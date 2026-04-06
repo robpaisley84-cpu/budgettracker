@@ -1,0 +1,45 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0d1a10;
+  --card:     #152018;
+  --border:   #243028;
+  --text:     #dde8d8;
+  --muted:    #6a8a70;
+  --accent:   #c8a050;
+  --accentL:  #e8c070;
+  --green:    #4aaa6a;
+  --red:      #c05a40;
+  --amber:    #d4840a;
+  --radius:   10px;
+  --font-display: 'Playfair Display', serif;
+  --font-body:    'Lato', sans-serif;
+  --font-mono:    'DM Mono', monospace;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+input, button, select, textarea {
+  font-family: var(--font-body);
+}
+
+button { cursor: pointer; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--card); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.mono { font-family: var(--font-mono); }
+
+/* Page transitions */
+.page { animation: fadeIn 0.18s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
