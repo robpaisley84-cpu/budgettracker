@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [loading, setLoading]         = useState(true)
   const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
+  const [editFunds, setEditFunds]     = useState(false)
   const [viewMonth, setViewMonth]     = useState(new Date())
   const month = format(viewMonth, 'yyyy-MM')
   const isCurrentMonth = month === format(new Date(), 'yyyy-MM')
@@ -33,7 +34,7 @@ export default function Dashboard() {
     const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
-      supabase.from('budget_items').select('id, name, budgeted_amount, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
+      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
 
     // This month's expenses (for monthly metrics)
@@ -82,12 +83,17 @@ export default function Dashboard() {
         ytdSpent,
         thisMonthSpent,
         fundBalance,
+        isPinned: item.is_pinned || false,
+        sortOrder: item.fund_sort_order || 0,
         category: item.category?.name || '',
         icon: item.category?.icon || '📋',
         color: item.category?.color || 'var(--muted)',
       }
     }).sort((a, b) => {
-      // Show lowest fund balance first (most urgent)
+      // Pinned items first, then by sort order, then by fund balance
+      if (a.isPinned && !b.isPinned) return -1
+      if (!a.isPinned && b.isPinned) return 1
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
       return a.fundBalance - b.fundBalance
     })
 
@@ -133,6 +139,30 @@ export default function Dashboard() {
   const projectedYearSpend = Math.round(ytdDailyRate * 365)
   const yearBudget = summary.budgeted * 12
   const yearIncome = NET_MO * 12
+
+  async function togglePin(itemId, currentlyPinned) {
+    await supabase.from('budget_items').update({ is_pinned: !currentlyPinned }).eq('id', itemId)
+    load()
+  }
+
+  async function moveFund(itemId, direction) {
+    const idx = funds.findIndex(f => f.id === itemId)
+    if (idx < 0) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= funds.length) return
+
+    const current = funds[idx]
+    const swap = funds[swapIdx]
+
+    // Only reorder within same group (pinned/unpinned)
+    if (current.isPinned !== swap.isPinned) return
+
+    await Promise.all([
+      supabase.from('budget_items').update({ fund_sort_order: swap.sortOrder || swapIdx }).eq('id', current.id),
+      supabase.from('budget_items').update({ fund_sort_order: current.sortOrder || idx }).eq('id', swap.id),
+    ])
+    load()
+  }
 
   const visibleFunds = showAll ? funds : funds.slice(0, 12)
 
@@ -277,10 +307,13 @@ export default function Dashboard() {
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Funds Available</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: totalFundBalance >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-              {totalFundBalance < 0 ? '-' : ''}{fmt(totalFundBalance)} total
+              {totalFundBalance < 0 ? '-' : ''}{fmt(totalFundBalance)}
             </span>
+            <button onClick={() => setEditFunds(!editFunds)} style={{ background: editFunds ? 'var(--accent)' : 'transparent', border: `1px solid ${editFunds ? 'var(--accent)' : 'var(--border)'}`, color: editFunds ? '#0d1a10' : 'var(--muted)', borderRadius: '5px', padding: '0.2rem 0.45rem', fontSize: '0.62rem', cursor: 'pointer', fontWeight: editFunds ? 700 : 400 }}>
+              {editFunds ? 'Done' : 'Reorder'}
+            </button>
             <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit →</Link>
           </div>
         </div>
@@ -294,9 +327,17 @@ export default function Dashboard() {
             const pct = f.totalAllocated > 0 ? Math.min((f.ytdSpent / f.totalAllocated) * 100, 100) : 0
             const balColor = f.fundBalance <= 0 ? 'var(--red)' : f.fundBalance < f.monthlyBudget * 0.5 ? 'var(--amber)' : 'var(--green)'
             return (
-              <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none' }}>
+              <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'rgba(200,160,80,0.04)' : 'transparent' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                  <span style={{ fontSize: '0.75rem' }}>{f.icon}</span>
+                  {editFunds && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                      <button onClick={() => moveFund(f.id, 'up')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▲</button>
+                      <button onClick={() => moveFund(f.id, 'down')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▼</button>
+                    </div>
+                  )}
+                  <button onClick={() => togglePin(f.id, f.isPinned)} style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', padding: 0, cursor: 'pointer', opacity: f.isPinned ? 1 : 0.35 }} title={f.isPinned ? 'Unpin' : 'Pin to top'}>
+                    {f.isPinned ? '⭐' : '☆'}
+                  </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
                   </div>
@@ -304,7 +345,7 @@ export default function Dashboard() {
                     {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: editFunds ? '1.1rem' : '1.65rem' }}>
                   <div style={{ flex: 1, background: 'var(--border)', borderRadius: '3px', height: '4px', overflow: 'hidden' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: balColor, borderRadius: '3px', transition: 'width 0.3s' }} />
                   </div>
