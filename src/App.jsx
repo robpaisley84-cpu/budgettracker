@@ -21,10 +21,10 @@ function RequireAuth({ children }) {
 }
 
 function AppShell() {
-  const { user, household, loading } = useAuth()
+  const { user, loading } = useAuth()
   if (loading) return (
-    <div style={{ color: '#c8a050', padding: '2rem', fontFamily: 'monospace' }}>
-      Loading... user: {user ? 'yes' : 'no'}, household: {household ? 'yes' : 'no'}
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0d1a10', color: '#c8a050', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
+      Loading Road Budget…
     </div>
   )
   if (!user) return <Routes><Route path="*" element={<Auth />} /></Routes>

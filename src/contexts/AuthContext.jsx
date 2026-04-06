@@ -11,17 +11,12 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log('getSession result:', session ? 'has session' : 'no session')
       setUser(session?.user ?? null)
       if (session?.user) loadHousehold(session.user.id)
       else setLoading(false)
-    }).catch(e => {
-      console.error('getSession failed:', e)
-      setLoading(false)
-    })
+    }).catch(() => setLoading(false))
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('auth state change:', event, session ? 'has session' : 'no session')
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_, session) => {
       setUser(session?.user ?? null)
       if (session?.user) await loadHousehold(session.user.id)
       else { setHousehold(null); setMember(null); setLoading(false) }
@@ -31,60 +26,26 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function loadHousehold(userId) {
-    console.log('loadHousehold called with userId:', userId)
     try {
-      // Test: raw fetch to check if REST API works at all
-      console.log('Testing raw fetch...')
-      try {
-        const rawRes = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/households?select=id&limit=1`,
-          {
-            headers: {
-              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            }
-          }
-        )
-        console.log('Raw fetch status:', rawRes.status)
-        const rawData = await rawRes.json()
-        console.log('Raw fetch data:', JSON.stringify(rawData))
-      } catch (e) { console.error('Raw fetch failed:', e) }
-
-      // Test: supabase client query
-      console.log('Testing supabase client query...')
-      const testRes = await supabase.from('households').select('id').limit(1)
-      console.log('Supabase client result:', JSON.stringify(testRes))
-
-      // Step 1: get member row
-      console.log('Querying household_members...')
-      const { data: mem, error: memErr } = await supabase
+      const { data: mem } = await supabase
         .from('household_members')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle()
 
-      console.log('member query result:', JSON.stringify({ mem, memErr }))
+      if (mem) {
+        const { data: hh } = await supabase
+          .from('households')
+          .select('*')
+          .eq('id', mem.household_id)
+          .maybeSingle()
 
-      if (memErr || !mem) {
-        console.log('No member found, stopping')
-        setLoading(false)
-        return
+        if (hh) {
+          setMember(mem)
+          setHousehold(hh)
+        }
       }
-
-      // Step 2: get household
-      const { data: hh, error: hhErr } = await supabase
-        .from('households')
-        .select('*')
-        .eq('id', mem.household_id)
-        .maybeSingle()
-
-      console.log('household query result:', JSON.stringify({ hh, hhErr }))
-
-      if (hh) {
-        setMember(mem)
-        setHousehold(hh)
-      }
-    } catch (e) { console.error('loadHousehold exception:', e) }
+    } catch (_) {}
     setLoading(false)
   }
 
@@ -96,7 +57,6 @@ export function AuthProvider({ children }) {
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error || !data.user) return { error }
 
-    // Create household + member for first user
     const { data: hh } = await supabase
       .from('households')
       .insert({ name: 'Road Budget' })
@@ -110,7 +70,6 @@ export function AuthProvider({ children }) {
         display_name: displayName,
         role: 'admin',
       })
-      // Seed the budget data
       await supabase.rpc('seed_budget', { hh_id: hh.id })
     }
 
@@ -118,7 +77,6 @@ export function AuthProvider({ children }) {
   }
 
   async function joinHousehold(inviteCode, displayName) {
-    // Simple join by household ID (share the UUID with Hayley)
     const { data: hh } = await supabase
       .from('households')
       .select()
