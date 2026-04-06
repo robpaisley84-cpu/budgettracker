@@ -33,10 +33,27 @@ export function AuthProvider({ children }) {
   async function loadHousehold(userId) {
     console.log('loadHousehold called with userId:', userId)
     try {
-      // Test: can we query anything at all?
-      console.log('Testing basic query...')
+      // Test: raw fetch to check if REST API works at all
+      console.log('Testing raw fetch...')
+      try {
+        const rawRes = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/households?select=id&limit=1`,
+          {
+            headers: {
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            }
+          }
+        )
+        console.log('Raw fetch status:', rawRes.status)
+        const rawData = await rawRes.json()
+        console.log('Raw fetch data:', JSON.stringify(rawData))
+      } catch (e) { console.error('Raw fetch failed:', e) }
+
+      // Test: supabase client query
+      console.log('Testing supabase client query...')
       const testRes = await supabase.from('households').select('id').limit(1)
-      console.log('Basic test result:', JSON.stringify(testRes))
+      console.log('Supabase client result:', JSON.stringify(testRes))
 
       // Step 1: get member row
       console.log('Querying household_members...')
