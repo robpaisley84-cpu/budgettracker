@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { format, startOfMonth, endOfMonth } from 'date-fns'
+import { format } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 const NET_MO = 8424
@@ -10,22 +10,60 @@ const NET_MO = 8424
 export default function Dashboard() {
   const { household } = useAuth()
   const [accounts, setAccounts]       = useState([])
+  const [funds, setFunds]             = useState([])
   const [summary, setSummary]         = useState({ budgeted: 0, spent: 0 })
   const [recent, setRecent]           = useState([])
   const [loading, setLoading]         = useState(true)
+  const [showAll, setShowAll]         = useState(false)
   const month = format(new Date(), 'yyyy-MM')
 
   useEffect(() => { if (household) load() }, [household])
 
   async function load() {
-    const [{ data: accs }, { data: txns }] = await Promise.all([
+    const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
+      supabase.from('budget_items').select('id, name, budgeted_amount, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
-    const { data: items } = await supabase.from('budget_items').select('budgeted_amount').eq('household_id', household.id).eq('is_active', true)
-    const budgeted = items?.reduce((s, i) => s + +i.budgeted_amount, 0) || 0
-    const spent    = txns?.filter(t => t.type === 'expense').reduce((s, t) => s + +t.amount, 0) || 0
+
+    // Build actuals map from all expense transactions this month
+    const { data: allTxns } = await supabase
+      .from('transactions')
+      .select('budget_item_id, amount')
+      .eq('household_id', household.id)
+      .eq('budget_month', month)
+      .eq('type', 'expense')
+
+    const actualsMap = {}
+    allTxns?.forEach(t => { actualsMap[t.budget_item_id] = (actualsMap[t.budget_item_id] || 0) + +t.amount })
+
+    // Build funds list: each budget item with its remaining balance
+    const fundsList = (items || []).map(item => {
+      const budgeted = +item.budgeted_amount
+      const spent = actualsMap[item.id] || 0
+      const remaining = budgeted - spent
+      return {
+        id: item.id,
+        name: item.name,
+        budgeted,
+        spent,
+        remaining,
+        category: item.category?.name || '',
+        icon: item.category?.icon || '📋',
+        color: item.category?.color || 'var(--muted)',
+      }
+    }).sort((a, b) => {
+      // Show items with activity first, then by remaining ascending (lowest first)
+      if (a.spent > 0 && b.spent === 0) return -1
+      if (a.spent === 0 && b.spent > 0) return 1
+      return a.remaining - b.remaining
+    })
+
+    const budgeted = (items || []).reduce((s, i) => s + +i.budgeted_amount, 0)
+    const spent = allTxns?.reduce((s, t) => s + +t.amount, 0) || 0
+
     setAccounts(accs || [])
+    setFunds(fundsList)
     setSummary({ budgeted, spent })
     setRecent(txns || [])
     setLoading(false)
@@ -33,6 +71,9 @@ export default function Dashboard() {
 
   const buffer = NET_MO - summary.spent
   const bufColor = buffer >= 1000 ? 'var(--green)' : buffer >= 0 ? 'var(--amber)' : 'var(--red)'
+
+  // Show top items by default, expand to see all
+  const visibleFunds = showAll ? funds : funds.slice(0, 10)
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
@@ -67,6 +108,51 @@ export default function Dashboard() {
         </div>
         <div style={{ background: 'var(--border)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
           <div style={{ width: `${Math.min((summary.spent/NET_MO)*100, 100)}%`, height: '100%', background: bufColor, borderRadius: '4px', transition: 'width 0.4s' }} />
+        </div>
+      </div>
+
+      {/* Funds Available — the envelope view */}
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Funds Available</h2>
+          <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit Budget →</Link>
+        </div>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+          {visibleFunds.length === 0 && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
+              No budget items yet — <Link to="/budget" style={{ color: 'var(--accent)' }}>set up your budget</Link>
+            </div>
+          )}
+          {visibleFunds.map((f, i) => {
+            const pct = f.budgeted > 0 ? Math.min((f.spent / f.budgeted) * 100, 100) : 0
+            const remainColor = f.remaining <= 0 ? 'var(--red)' : f.remaining < f.budgeted * 0.25 ? 'var(--amber)' : 'var(--green)'
+            return (
+              <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                  <span style={{ fontSize: '0.75rem' }}>{f.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: remainColor }}>
+                    {f.remaining < 0 ? '-' : ''}{fmt(f.remaining)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div style={{ flex: 1, background: 'var(--border)', borderRadius: '3px', height: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: remainColor, borderRadius: '3px', transition: 'width 0.3s' }} />
+                  </div>
+                  <div style={{ fontSize: '0.58rem', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+                    {fmt(f.spent)} / {fmt(f.budgeted)}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+          {funds.length > 10 && (
+            <button onClick={() => setShowAll(!showAll)} style={{ width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--accent)', fontSize: '0.72rem', padding: '0.6rem', cursor: 'pointer' }}>
+              {showAll ? 'Show less' : `Show all ${funds.length} items`}
+            </button>
+          )}
         </div>
       </div>
 
