@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { format } from 'date-fns'
+import { format, startOfYear, addMonths, subMonths, getDaysInMonth, getDate } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 const NET_MO = 8424
@@ -13,21 +13,27 @@ export default function Dashboard() {
   const [funds, setFunds]             = useState([])
   const [summary, setSummary]         = useState({ budgeted: 0, spent: 0 })
   const [recent, setRecent]           = useState([])
+  const [ytd, setYtd]                 = useState({ budgeted: 0, spent: 0, months: 0 })
+  const [monthlyBreakdown, setMonthlyBreakdown] = useState([])
   const [loading, setLoading]         = useState(true)
   const [showAll, setShowAll]         = useState(false)
-  const month = format(new Date(), 'yyyy-MM')
+  const [showYtd, setShowYtd]         = useState(false)
+  const [viewMonth, setViewMonth]     = useState(new Date())
+  const month = format(viewMonth, 'yyyy-MM')
+  const isCurrentMonth = month === format(new Date(), 'yyyy-MM')
 
-  useEffect(() => { if (household) load() }, [household])
+  useEffect(() => { if (household) load() }, [household, month])
 
   async function load() {
+    setLoading(true)
     const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
       supabase.from('budget_items').select('id, name, budgeted_amount, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
 
-    // Build actuals map from all expense transactions this month
-    const { data: allTxns } = await supabase
+    // This month's expenses
+    const { data: monthTxns } = await supabase
       .from('transactions')
       .select('budget_item_id, amount')
       .eq('household_id', household.id)
@@ -35,54 +41,96 @@ export default function Dashboard() {
       .eq('type', 'expense')
 
     const actualsMap = {}
-    allTxns?.forEach(t => { actualsMap[t.budget_item_id] = (actualsMap[t.budget_item_id] || 0) + +t.amount })
+    monthTxns?.forEach(t => { actualsMap[t.budget_item_id] = (actualsMap[t.budget_item_id] || 0) + +t.amount })
 
-    // Build funds list: each budget item with its remaining balance
+    // Build funds list
     const fundsList = (items || []).map(item => {
       const budgeted = +item.budgeted_amount
       const spent = actualsMap[item.id] || 0
-      const remaining = budgeted - spent
-      return {
-        id: item.id,
-        name: item.name,
-        budgeted,
-        spent,
-        remaining,
-        category: item.category?.name || '',
-        icon: item.category?.icon || '📋',
-        color: item.category?.color || 'var(--muted)',
-      }
+      return { id: item.id, name: item.name, budgeted, spent, remaining: budgeted - spent, category: item.category?.name || '', icon: item.category?.icon || '📋', color: item.category?.color || 'var(--muted)' }
     }).sort((a, b) => {
-      // Show items with activity first, then by remaining ascending (lowest first)
       if (a.spent > 0 && b.spent === 0) return -1
       if (a.spent === 0 && b.spent > 0) return 1
       return a.remaining - b.remaining
     })
 
     const budgeted = (items || []).reduce((s, i) => s + +i.budgeted_amount, 0)
-    const spent = allTxns?.reduce((s, t) => s + +t.amount, 0) || 0
+    const spent = monthTxns?.reduce((s, t) => s + +t.amount, 0) || 0
+
+    // YTD data — all expense transactions from Jan to current month of selected year
+    const year = format(viewMonth, 'yyyy')
+    const janMonth = `${year}-01`
+    const { data: ytdTxns } = await supabase
+      .from('transactions')
+      .select('budget_month, amount')
+      .eq('household_id', household.id)
+      .eq('type', 'expense')
+      .gte('budget_month', janMonth)
+      .lte('budget_month', month)
+
+    // Monthly breakdown for YTD
+    const monthMap = {}
+    ytdTxns?.forEach(t => {
+      monthMap[t.budget_month] = (monthMap[t.budget_month] || 0) + +t.amount
+    })
+
+    // Count months from Jan to selected month
+    const selectedMonthNum = parseInt(format(viewMonth, 'M'))
+    const ytdBudgeted = budgeted * selectedMonthNum
+    const ytdSpent = ytdTxns?.reduce((s, t) => s + +t.amount, 0) || 0
+
+    // Build monthly breakdown array
+    const breakdown = []
+    for (let m = 1; m <= selectedMonthNum; m++) {
+      const mKey = `${year}-${String(m).padStart(2, '0')}`
+      breakdown.push({
+        month: mKey,
+        label: format(new Date(parseInt(year), m - 1, 1), 'MMM'),
+        spent: monthMap[mKey] || 0,
+        budgeted,
+      })
+    }
 
     setAccounts(accs || [])
     setFunds(fundsList)
     setSummary({ budgeted, spent })
     setRecent(txns || [])
+    setYtd({ budgeted: ytdBudgeted, spent: ytdSpent, months: selectedMonthNum })
+    setMonthlyBreakdown(breakdown)
     setLoading(false)
   }
 
   const buffer = NET_MO - summary.spent
   const bufColor = buffer >= 1000 ? 'var(--green)' : buffer >= 0 ? 'var(--amber)' : 'var(--red)'
 
-  // Show top items by default, expand to see all
+  // Projection: based on daily spend rate so far this month
+  const dayOfMonth = isCurrentMonth ? getDate(new Date()) : getDaysInMonth(viewMonth)
+  const daysInMonth = getDaysInMonth(viewMonth)
+  const dailyRate = dayOfMonth > 0 ? summary.spent / dayOfMonth : 0
+  const projectedSpend = Math.round(dailyRate * daysInMonth)
+  const projectedRemaining = NET_MO - projectedSpend
+  const projColor = projectedRemaining >= 500 ? 'var(--green)' : projectedRemaining >= 0 ? 'var(--amber)' : 'var(--red)'
+
+  // YTD projection for year-end
+  const ytdDailyRate = ytd.months > 0 ? ytd.spent / (ytd.months * 30) : 0
+  const projectedYearSpend = Math.round(ytdDailyRate * 365)
+  const yearBudget = summary.budgeted * 12
+  const yearIncome = NET_MO * 12
+
   const visibleFunds = showAll ? funds : funds.slice(0, 10)
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
-      {/* Header */}
+      {/* Header with month navigation */}
       <div style={{ marginBottom: '1.1rem' }}>
         <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--accent)', textTransform: 'uppercase' }}>Road Budget</div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)' }}>{format(new Date(), 'MMMM yyyy')}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <button onClick={() => setViewMonth(d => subMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>‹</button>
+          <h1 style={{ flex: 1, fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', textAlign: 'center' }}>{format(viewMonth, 'MMMM yyyy')}</h1>
+          <button onClick={() => setViewMonth(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>›</button>
+        </div>
       </div>
 
       {/* Key metrics */}
@@ -111,7 +159,106 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Funds Available — the envelope view */}
+      {/* Projected End of Month */}
+      {isCurrentMonth && summary.spent > 0 && (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Projected End of Month</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center' }}>
+            <div>
+              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Daily Avg</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: 'var(--accentL)', fontWeight: 500 }}>{fmt(dailyRate)}/day</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Proj. Spend</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: 'var(--accentL)', fontWeight: 500 }}>{fmt(projectedSpend)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Proj. Balance</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: projColor, fontWeight: 500 }}>{projectedRemaining < 0 ? '-' : ''}{fmt(projectedRemaining)}</div>
+            </div>
+          </div>
+          <div style={{ marginTop: '0.5rem', fontSize: '0.6rem', color: 'var(--muted)', textAlign: 'center' }}>
+            Based on {dayOfMonth} of {daysInMonth} days elapsed
+          </div>
+        </div>
+      )}
+
+      {/* YTD Overview */}
+      <div style={{ marginBottom: '1rem' }}>
+        <button onClick={() => setShowYtd(!showYtd)} style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.75rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: 'var(--text)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 400 }}>Year to Date — {format(viewMonth, 'yyyy')}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: ytd.spent <= ytd.budgeted ? 'var(--green)' : 'var(--red)' }}>{fmt(ytd.spent)} / {fmt(ytd.budgeted)}</span>
+            <span style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{showYtd ? '▲' : '▼'}</span>
+          </div>
+        </button>
+
+        {showYtd && (
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 var(--radius) var(--radius)', padding: '0.85rem', marginTop: '-1px' }}>
+            {/* YTD Summary */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center', marginBottom: '0.85rem' }}>
+              {[
+                { l: 'YTD Budget', v: fmt(ytd.budgeted), c: 'var(--muted)' },
+                { l: 'YTD Spent', v: fmt(ytd.spent), c: 'var(--accentL)' },
+                { l: 'YTD Savings', v: fmt(ytd.budgeted - ytd.spent), c: ytd.budgeted - ytd.spent >= 0 ? 'var(--green)' : 'var(--red)' },
+              ].map(x => (
+                <div key={x.l}>
+                  <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{x.l}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: x.c, fontWeight: 500 }}>{x.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Monthly bars */}
+            <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>Monthly Breakdown</div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.25rem', height: '80px', marginBottom: '0.25rem' }}>
+              {monthlyBreakdown.map(m => {
+                const maxVal = Math.max(summary.budgeted, ...monthlyBreakdown.map(x => x.spent))
+                const barH = maxVal > 0 ? (m.spent / maxVal) * 100 : 0
+                const budgetH = maxVal > 0 ? (m.budgeted / maxVal) * 100 : 0
+                const overBudget = m.spent > m.budgeted
+                return (
+                  <div key={m.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', position: 'relative' }}>
+                    <div style={{ position: 'absolute', bottom: `${budgetH}%`, left: 0, right: 0, borderTop: '1px dashed var(--muted)', opacity: 0.3 }} />
+                    <div style={{ width: '100%', height: `${barH}%`, background: overBudget ? 'var(--red)' : 'var(--green)', borderRadius: '3px 3px 0 0', minHeight: m.spent > 0 ? '3px' : 0, transition: 'height 0.3s' }} />
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: '0.25rem' }}>
+              {monthlyBreakdown.map(m => (
+                <div key={m.month} style={{ flex: 1, textAlign: 'center', fontSize: '0.55rem', color: m.month === month ? 'var(--accentL)' : 'var(--muted)', fontWeight: m.month === month ? 700 : 400 }}>{m.label}</div>
+              ))}
+            </div>
+
+            {/* Year-end projection */}
+            {ytd.spent > 0 && (
+              <div style={{ marginTop: '0.85rem', padding: '0.65rem', background: 'var(--bg)', borderRadius: '7px' }}>
+                <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.4rem' }}>Year-End Projection</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center' }}>
+                  {[
+                    { l: 'Proj. Expenses', v: fmt(projectedYearSpend), c: 'var(--accentL)' },
+                    { l: 'Annual Budget', v: fmt(yearBudget), c: 'var(--muted)' },
+                    { l: 'Proj. Net', v: fmt(yearIncome - projectedYearSpend), c: yearIncome - projectedYearSpend >= 0 ? 'var(--green)' : 'var(--red)' },
+                  ].map(x => (
+                    <div key={x.l}>
+                      <div style={{ fontSize: '0.55rem', color: 'var(--muted)', textTransform: 'uppercase' }}>{x.l}</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: x.c, fontWeight: 500 }}>{x.v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.35rem' }}>
+                  Avg {fmt(ytd.spent / ytd.months)}/mo over {ytd.months} month{ytd.months > 1 ? 's' : ''}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Funds Available */}
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Funds Available</h2>
