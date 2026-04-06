@@ -11,12 +11,17 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('getSession result:', session ? 'has session' : 'no session')
       setUser(session?.user ?? null)
       if (session?.user) loadHousehold(session.user.id)
       else setLoading(false)
+    }).catch(e => {
+      console.error('getSession failed:', e)
+      setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('auth state change:', event, session ? 'has session' : 'no session')
       setUser(session?.user ?? null)
       if (session?.user) await loadHousehold(session.user.id)
       else { setHousehold(null); setMember(null); setLoading(false) }
