@@ -33,7 +33,13 @@ export function AuthProvider({ children }) {
   async function loadHousehold(userId) {
     console.log('loadHousehold called with userId:', userId)
     try {
+      // Test: can we query anything at all?
+      console.log('Testing basic query...')
+      const testRes = await supabase.from('households').select('id').limit(1)
+      console.log('Basic test result:', JSON.stringify(testRes))
+
       // Step 1: get member row
+      console.log('Querying household_members...')
       const { data: mem, error: memErr } = await supabase
         .from('household_members')
         .select('*')
