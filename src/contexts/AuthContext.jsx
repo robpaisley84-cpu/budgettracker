@@ -31,17 +31,23 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function loadHousehold(userId) {
+    console.log('loadHousehold called with userId:', userId)
     try {
-      const { data: mem, error } = await supabase
+      const res = await supabase
         .from('household_members')
         .select('*, household:households(*)')
         .eq('user_id', userId)
         .maybeSingle()
 
-      if (error) console.error('loadHousehold error:', error)
-      if (mem) {
-        setMember(mem)
-        setHousehold(mem.household)
+      console.log('loadHousehold full response:', JSON.stringify(res))
+
+      if (res.error) console.error('loadHousehold error:', res.error)
+      if (res.data) {
+        console.log('Setting member and household:', res.data)
+        setMember(res.data)
+        setHousehold(res.data.household)
+      } else {
+        console.log('No member data found')
       }
     } catch (e) { console.error('loadHousehold exception:', e) }
     setLoading(false)
