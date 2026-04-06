@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { format, startOfYear, addMonths, subMonths, getDaysInMonth, getDate } from 'date-fns'
+import { format, addMonths, subMonths, getDaysInMonth, getDate } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 const NET_MO = 8424
@@ -26,13 +26,17 @@ export default function Dashboard() {
 
   async function load() {
     setLoading(true)
+    const year = format(viewMonth, 'yyyy')
+    const janMonth = `${year}-01`
+    const selectedMonthNum = parseInt(format(viewMonth, 'M'))
+
     const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
       supabase.from('budget_items').select('id, name, budgeted_amount, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
 
-    // This month's expenses
+    // This month's expenses (for monthly metrics)
     const { data: monthTxns } = await supabase
       .from('transactions')
       .select('budget_item_id, amount')
@@ -40,46 +44,59 @@ export default function Dashboard() {
       .eq('budget_month', month)
       .eq('type', 'expense')
 
-    const actualsMap = {}
-    monthTxns?.forEach(t => { actualsMap[t.budget_item_id] = (actualsMap[t.budget_item_id] || 0) + +t.amount })
-
-    // Build funds list
-    const fundsList = (items || []).map(item => {
-      const budgeted = +item.budgeted_amount
-      const spent = actualsMap[item.id] || 0
-      return { id: item.id, name: item.name, budgeted, spent, remaining: budgeted - spent, category: item.category?.name || '', icon: item.category?.icon || '📋', color: item.category?.color || 'var(--muted)' }
-    }).sort((a, b) => {
-      if (a.spent > 0 && b.spent === 0) return -1
-      if (a.spent === 0 && b.spent > 0) return 1
-      return a.remaining - b.remaining
-    })
-
-    const budgeted = (items || []).reduce((s, i) => s + +i.budgeted_amount, 0)
-    const spent = monthTxns?.reduce((s, t) => s + +t.amount, 0) || 0
-
-    // YTD data — all expense transactions from Jan to current month of selected year
-    const year = format(viewMonth, 'yyyy')
-    const janMonth = `${year}-01`
-    const { data: ytdTxns } = await supabase
+    // YTD expenses per budget item (for envelope balances)
+    const { data: ytdItemTxns } = await supabase
       .from('transactions')
-      .select('budget_month, amount')
+      .select('budget_item_id, budget_month, amount')
       .eq('household_id', household.id)
       .eq('type', 'expense')
       .gte('budget_month', janMonth)
       .lte('budget_month', month)
 
-    // Monthly breakdown for YTD
+    // Monthly actuals for this month only (for monthly summary)
+    const monthActuals = {}
+    monthTxns?.forEach(t => { monthActuals[t.budget_item_id] = (monthActuals[t.budget_item_id] || 0) + +t.amount })
+
+    // YTD actuals per item (for envelope balances)
+    const ytdActuals = {}
+    ytdItemTxns?.forEach(t => { ytdActuals[t.budget_item_id] = (ytdActuals[t.budget_item_id] || 0) + +t.amount })
+
+    // Monthly breakdown totals
     const monthMap = {}
-    ytdTxns?.forEach(t => {
-      monthMap[t.budget_month] = (monthMap[t.budget_month] || 0) + +t.amount
+    ytdItemTxns?.forEach(t => { monthMap[t.budget_month] = (monthMap[t.budget_month] || 0) + +t.amount })
+
+    // Build envelope funds list
+    // Fund Balance = (Monthly Budget × Months Through Selected Month) - Total YTD Spent
+    const fundsList = (items || []).map(item => {
+      const monthlyBudget = +item.budgeted_amount
+      const totalAllocated = monthlyBudget * selectedMonthNum
+      const ytdSpent = ytdActuals[item.id] || 0
+      const thisMonthSpent = monthActuals[item.id] || 0
+      const fundBalance = totalAllocated - ytdSpent
+
+      return {
+        id: item.id,
+        name: item.name,
+        monthlyBudget,
+        totalAllocated,
+        ytdSpent,
+        thisMonthSpent,
+        fundBalance,
+        category: item.category?.name || '',
+        icon: item.category?.icon || '📋',
+        color: item.category?.color || 'var(--muted)',
+      }
+    }).sort((a, b) => {
+      // Show lowest fund balance first (most urgent)
+      return a.fundBalance - b.fundBalance
     })
 
-    // Count months from Jan to selected month
-    const selectedMonthNum = parseInt(format(viewMonth, 'M'))
+    const budgeted = (items || []).reduce((s, i) => s + +i.budgeted_amount, 0)
+    const monthSpent = monthTxns?.reduce((s, t) => s + +t.amount, 0) || 0
     const ytdBudgeted = budgeted * selectedMonthNum
-    const ytdSpent = ytdTxns?.reduce((s, t) => s + +t.amount, 0) || 0
+    const ytdSpentTotal = ytdItemTxns?.reduce((s, t) => s + +t.amount, 0) || 0
 
-    // Build monthly breakdown array
+    // Monthly breakdown array
     const breakdown = []
     for (let m = 1; m <= selectedMonthNum; m++) {
       const mKey = `${year}-${String(m).padStart(2, '0')}`
@@ -93,9 +110,9 @@ export default function Dashboard() {
 
     setAccounts(accs || [])
     setFunds(fundsList)
-    setSummary({ budgeted, spent })
+    setSummary({ budgeted, spent: monthSpent })
     setRecent(txns || [])
-    setYtd({ budgeted: ytdBudgeted, spent: ytdSpent, months: selectedMonthNum })
+    setYtd({ budgeted: ytdBudgeted, spent: ytdSpentTotal, months: selectedMonthNum })
     setMonthlyBreakdown(breakdown)
     setLoading(false)
   }
@@ -103,7 +120,7 @@ export default function Dashboard() {
   const buffer = NET_MO - summary.spent
   const bufColor = buffer >= 1000 ? 'var(--green)' : buffer >= 0 ? 'var(--amber)' : 'var(--red)'
 
-  // Projection: based on daily spend rate so far this month
+  // Projection
   const dayOfMonth = isCurrentMonth ? getDate(new Date()) : getDaysInMonth(viewMonth)
   const daysInMonth = getDaysInMonth(viewMonth)
   const dailyRate = dayOfMonth > 0 ? summary.spent / dayOfMonth : 0
@@ -111,13 +128,16 @@ export default function Dashboard() {
   const projectedRemaining = NET_MO - projectedSpend
   const projColor = projectedRemaining >= 500 ? 'var(--green)' : projectedRemaining >= 0 ? 'var(--amber)' : 'var(--red)'
 
-  // YTD projection for year-end
+  // YTD projection
   const ytdDailyRate = ytd.months > 0 ? ytd.spent / (ytd.months * 30) : 0
   const projectedYearSpend = Math.round(ytdDailyRate * 365)
   const yearBudget = summary.budgeted * 12
   const yearIncome = NET_MO * 12
 
-  const visibleFunds = showAll ? funds : funds.slice(0, 10)
+  const visibleFunds = showAll ? funds : funds.slice(0, 12)
+
+  // Total envelope balance
+  const totalFundBalance = funds.reduce((s, f) => s + f.fundBalance, 0)
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
@@ -185,10 +205,8 @@ export default function Dashboard() {
 
       {/* YTD Overview */}
       <div style={{ marginBottom: '1rem' }}>
-        <button onClick={() => setShowYtd(!showYtd)} style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.75rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: 'var(--text)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 400 }}>Year to Date — {format(viewMonth, 'yyyy')}</span>
-          </div>
+        <button onClick={() => setShowYtd(!showYtd)} style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: showYtd ? 'var(--radius) var(--radius) 0 0' : 'var(--radius)', padding: '0.75rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: 'var(--text)' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 400 }}>Year to Date — {format(viewMonth, 'yyyy')}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: ytd.spent <= ytd.budgeted ? 'var(--green)' : 'var(--red)' }}>{fmt(ytd.spent)} / {fmt(ytd.budgeted)}</span>
             <span style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{showYtd ? '▲' : '▼'}</span>
@@ -197,7 +215,6 @@ export default function Dashboard() {
 
         {showYtd && (
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 var(--radius) var(--radius)', padding: '0.85rem', marginTop: '-1px' }}>
-            {/* YTD Summary */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center', marginBottom: '0.85rem' }}>
               {[
                 { l: 'YTD Budget', v: fmt(ytd.budgeted), c: 'var(--muted)' },
@@ -211,7 +228,6 @@ export default function Dashboard() {
               ))}
             </div>
 
-            {/* Monthly bars */}
             <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>Monthly Breakdown</div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.25rem', height: '80px', marginBottom: '0.25rem' }}>
               {monthlyBreakdown.map(m => {
@@ -233,7 +249,6 @@ export default function Dashboard() {
               ))}
             </div>
 
-            {/* Year-end projection */}
             {ytd.spent > 0 && (
               <div style={{ marginTop: '0.85rem', padding: '0.65rem', background: 'var(--bg)', borderRadius: '7px' }}>
                 <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.4rem' }}>Year-End Projection</div>
@@ -258,11 +273,16 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Funds Available */}
+      {/* Funds Available — envelope balances */}
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Funds Available</h2>
-          <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit Budget →</Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: totalFundBalance >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+              {totalFundBalance < 0 ? '-' : ''}{fmt(totalFundBalance)} total
+            </span>
+            <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit →</Link>
+          </div>
         </div>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
           {visibleFunds.length === 0 && (
@@ -271,8 +291,8 @@ export default function Dashboard() {
             </div>
           )}
           {visibleFunds.map((f, i) => {
-            const pct = f.budgeted > 0 ? Math.min((f.spent / f.budgeted) * 100, 100) : 0
-            const remainColor = f.remaining <= 0 ? 'var(--red)' : f.remaining < f.budgeted * 0.25 ? 'var(--amber)' : 'var(--green)'
+            const pct = f.totalAllocated > 0 ? Math.min((f.ytdSpent / f.totalAllocated) * 100, 100) : 0
+            const balColor = f.fundBalance <= 0 ? 'var(--red)' : f.fundBalance < f.monthlyBudget * 0.5 ? 'var(--amber)' : 'var(--green)'
             return (
               <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
@@ -280,22 +300,23 @@ export default function Dashboard() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
                   </div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: remainColor }}>
-                    {f.remaining < 0 ? '-' : ''}{fmt(f.remaining)}
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: balColor }}>
+                    {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <div style={{ flex: 1, background: 'var(--border)', borderRadius: '3px', height: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: remainColor, borderRadius: '3px', transition: 'width 0.3s' }} />
+                    <div style={{ width: `${pct}%`, height: '100%', background: balColor, borderRadius: '3px', transition: 'width 0.3s' }} />
                   </div>
-                  <div style={{ fontSize: '0.58rem', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
-                    {fmt(f.spent)} / {fmt(f.budgeted)}
+                  <div style={{ fontSize: '0.55rem', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+                    {fmt(f.ytdSpent)} spent / {fmt(f.totalAllocated)} alloc
+                    {f.thisMonthSpent > 0 && <span style={{ color: 'var(--accentL)' }}> · {fmt(f.thisMonthSpent)} this mo</span>}
                   </div>
                 </div>
               </div>
             )
           })}
-          {funds.length > 10 && (
+          {funds.length > 12 && (
             <button onClick={() => setShowAll(!showAll)} style={{ width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--accent)', fontSize: '0.72rem', padding: '0.6rem', cursor: 'pointer' }}>
               {showAll ? 'Show less' : `Show all ${funds.length} items`}
             </button>
