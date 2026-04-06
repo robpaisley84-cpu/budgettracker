@@ -27,17 +27,18 @@ export function AuthProvider({ children }) {
 
   async function loadHousehold(userId) {
     try {
-      const { data: mem } = await supabase
+      const { data: mem, error } = await supabase
         .from('household_members')
         .select('*, household:households(*)')
         .eq('user_id', userId)
-        .single()
+        .maybeSingle()
 
+      if (error) console.error('loadHousehold error:', error)
       if (mem) {
         setMember(mem)
         setHousehold(mem.household)
       }
-    } catch (_) {}
+    } catch (e) { console.error('loadHousehold exception:', e) }
     setLoading(false)
   }
 
