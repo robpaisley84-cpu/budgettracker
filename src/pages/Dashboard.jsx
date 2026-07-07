@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO } from 'date-fns'
+import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO, differenceInCalendarDays } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [recent, setRecent]           = useState([])
   const [ytd, setYtd]                 = useState({ budgeted: 0, spent: 0, months: 0 })
   const [monthlyBreakdown, setMonthlyBreakdown] = useState([])
+  const [dueSoon, setDueSoon]         = useState([])
   const [loading, setLoading]         = useState(true)
   const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
@@ -141,17 +142,36 @@ export default function Dashboard() {
       })
     }
 
+    // Upcoming annual/quarterly bills (reminders)
+    const { data: periodicItems } = await supabase
+      .from('budget_items')
+      .select('id, name, budgeted_amount, next_due_date, bill_frequency, category:budget_categories(icon)')
+      .eq('household_id', household.id)
+      .eq('is_active', true)
+      .in('bill_frequency', ['annual', 'quarterly'])
+      .not('next_due_date', 'is', null)
+    const soon = (periodicItems || [])
+      .map(i => ({ ...i, daysUntil: differenceInCalendarDays(parseISO(i.next_due_date), new Date()) }))
+      .filter(i => i.daysUntil <= 45)
+      .sort((a, b) => a.daysUntil - b.daysUntil)
+      .slice(0, 4)
+
     setAccounts(accs || [])
     setFunds(fundsList)
     setSummary({ budgeted, spent: monthSpent })
     setRecent(txns || [])
     setYtd({ budgeted: ytdBudgeted, spent: ytdSpentTotal, months: selectedMonthNum })
     setMonthlyBreakdown(breakdown)
+    setDueSoon(soon)
     setLoading(false)
   }
 
   const buffer = NET_MO - summary.spent
   const bufColor = buffer >= 1000 ? 'var(--green)' : buffer >= 0 ? 'var(--amber)' : 'var(--red)'
+
+  // Carry-over: does this month's income cover the full budget? Lean (2-check) months
+  // need money carried in from a prior surplus; extra-check months build the reserve.
+  const monthNet = NET_MO - summary.budgeted
 
   // Projection
   const dayOfMonth = isCurrentMonth ? getDate(new Date()) : getDaysInMonth(viewMonth)
@@ -224,6 +244,48 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Carry-over from previous month */}
+      <div style={{ background: 'var(--card)', border: `1px solid ${monthNet < 0 ? 'var(--red)' : 'var(--green)'}`, borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem' }}>
+          <div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem' }}>
+              {monthNet < 0 ? 'Carry-over needed' : 'Building reserve'}
+            </div>
+            <div style={{ fontSize: '1.35rem', fontFamily: 'var(--font-mono)', fontWeight: 500, color: monthNet < 0 ? 'var(--red)' : 'var(--green)' }}>
+              {monthNet >= 0 ? '+' : ''}{fmt(monthNet)}
+            </div>
+          </div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textAlign: 'right', maxWidth: '60%', lineHeight: 1.4 }}>
+            {payCount} paycheck{payCount !== 1 ? 's' : ''} this month.{' '}
+            {monthNet < 0
+              ? `Income (${fmt(NET_MO)}) is under budget (${fmt(summary.budgeted)}) — cover the gap from last month's surplus.`
+              : `Income covers the budget — set this aside for lean months.`}
+          </div>
+        </div>
+      </div>
+
+      {/* Due soon reminders */}
+      {dueSoon.length > 0 && (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>🔔 Due soon</div>
+            <Link to="/bills" style={{ fontSize: '0.65rem', color: 'var(--accent)', textDecoration: 'none' }}>All bills →</Link>
+          </div>
+          {dueSoon.map((i, idx) => {
+            const past = i.daysUntil < 0, urgent = i.daysUntil <= 14
+            const c = past ? 'var(--red)' : urgent ? 'var(--amber)' : 'var(--muted)'
+            return (
+              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                <span style={{ fontSize: '0.85rem' }}>{i.category?.icon || '📄'}</span>
+                <span style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text)' }}>{i.name}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--muted)' }}>{format(parseISO(i.next_due_date), 'MMM d')}</span>
+                <span style={{ fontSize: '0.68rem', color: c, minWidth: '3.2rem', textAlign: 'right' }}>{past ? `${Math.abs(i.daysUntil)}d over` : i.daysUntil === 0 ? 'today' : `in ${i.daysUntil}d`}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Progress bar */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
