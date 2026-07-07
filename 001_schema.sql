@@ -5,8 +5,10 @@
 CREATE TABLE households (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL DEFAULT 'The Family Budget',
-  monthly_income DECIMAL(10,2) DEFAULT 8424,
-  paycheck_amount DECIMAL(10,2) DEFAULT 4212,
+  monthly_income DECIMAL(10,2) DEFAULT 8236.37,
+  paycheck_amount DECIMAL(10,2) DEFAULT 3801.71,
+  pay_frequency TEXT DEFAULT 'biweekly',   -- weekly | biweekly | semimonthly | monthly
+  pay_anchor_date DATE,                     -- a known payday; anchors weekly/biweekly cycles
   paycheck_day_1 INT DEFAULT 1,
   paycheck_day_2 INT DEFAULT 15,
   created_at TIMESTAMPTZ DEFAULT NOW()

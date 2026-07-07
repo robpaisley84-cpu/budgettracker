@@ -2,10 +2,31 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { format, addMonths, subMonths, getDaysInMonth, getDate } from 'date-fns'
+import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
-const NET_MO = 8424
+
+const CHECKS_PER_YEAR = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 }
+
+// How many paydays actually land inside the given calendar month.
+// Bi-weekly/weekly are stepped from a known anchor payday, so most months
+// have 2 (or 4) checks and a couple each year have 3 (or 5).
+function paydaysInMonth(monthDate, freq, anchorISO, day1 = 1, day2 = 15) {
+  if (freq === 'monthly') return 1
+  if (freq === 'semimonthly') {
+    const dim = getDaysInMonth(monthDate)
+    return [day1, day2].filter(d => d >= 1 && d <= dim).length || 2
+  }
+  const step  = freq === 'weekly' ? 7 : 14
+  if (!anchorISO) return freq === 'weekly' ? 4 : 2  // fallback until an anchor payday is set
+  const start = startOfMonth(monthDate)
+  const end   = endOfMonth(monthDate)
+  let d = parseISO(anchorISO)
+  while (d > start) d = addDays(d, -step)      // rewind to on/before the month
+  let count = 0
+  while (d <= end) { if (d >= start) count++; d = addDays(d, step) }
+  return count
+}
 
 export default function Dashboard() {
   const { household } = useAuth()
@@ -22,6 +43,12 @@ export default function Dashboard() {
   const [viewMonth, setViewMonth]     = useState(new Date())
   const month = format(viewMonth, 'yyyy-MM')
   const isCurrentMonth = month === format(new Date(), 'yyyy-MM')
+
+  // Monthly income = the paychecks that actually hit the account in the viewed month
+  const perCheck = +household?.paycheck_amount || 0
+  const payFreq  = household?.pay_frequency || 'biweekly'
+  const payCount = paydaysInMonth(viewMonth, payFreq, household?.pay_anchor_date, household?.paycheck_day_1, household?.paycheck_day_2)
+  const NET_MO   = perCheck * payCount
 
   useEffect(() => { if (household) load() }, [household, month])
 
@@ -138,7 +165,7 @@ export default function Dashboard() {
   const ytdDailyRate = ytd.months > 0 ? ytd.spent / (ytd.months * 30) : 0
   const projectedYearSpend = Math.round(ytdDailyRate * 365)
   const yearBudget = summary.budgeted * 12
-  const yearIncome = NET_MO * 12
+  const yearIncome = perCheck * (CHECKS_PER_YEAR[payFreq] || 26)  // true annual, not the current month × 12
 
   async function togglePin(itemId, currentlyPinned) {
     await supabase.from('budget_items').update({ is_pinned: !currentlyPinned }).eq('id', itemId)
@@ -186,7 +213,7 @@ export default function Dashboard() {
       {/* Key metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1rem' }}>
         {[
-          { l: 'Monthly Income', v: fmt(NET_MO), c: 'var(--green)' },
+          { l: `Monthly Income (${payCount}×)`, v: fmt(NET_MO), c: 'var(--green)' },
           { l: 'Spent This Month', v: fmt(summary.spent), c: 'var(--accentL)' },
           { l: 'Budget', v: fmt(summary.budgeted), c: 'var(--muted)' },
           { l: 'Remaining', v: fmt(buffer), c: bufColor },

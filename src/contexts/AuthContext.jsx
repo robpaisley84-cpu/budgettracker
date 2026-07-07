@@ -96,6 +96,18 @@ export function AuthProvider({ children }) {
     return { error }
   }
 
+  async function updateHousehold(patch) {
+    if (!household) return { error: 'No household' }
+    const { data, error } = await supabase
+      .from('households')
+      .update(patch)
+      .eq('id', household.id)
+      .select()
+      .maybeSingle()
+    if (!error && data) setHousehold(data)
+    return { data, error }
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
     setHousehold(null)
@@ -103,7 +115,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, household, member, loading, signIn, signUp, joinHousehold, signOut }}>
+    <AuthContext.Provider value={{ user, household, member, loading, signIn, signUp, joinHousehold, updateHousehold, signOut }}>
       {children}
     </AuthContext.Provider>
   )
