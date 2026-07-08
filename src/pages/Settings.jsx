@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
 
 const fmt2 = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -19,6 +20,19 @@ export default function Settings() {
   const [anchor, setAnchor]     = useState(household?.pay_anchor_date || '')
   const [saving, setSaving]     = useState(false)
   const [savedAt, setSavedAt]   = useState(false)
+
+  const [newPw, setNewPw]       = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwMsg, setPwMsg]       = useState(null)  // { ok, text }
+
+  async function changePassword() {
+    if (newPw.length < 6) { setPwMsg({ ok: false, text: 'Must be at least 6 characters' }); return }
+    setPwSaving(true); setPwMsg(null)
+    const { error } = await supabase.auth.updateUser({ password: newPw })
+    setPwSaving(false)
+    if (error) setPwMsg({ ok: false, text: error.message })
+    else { setPwMsg({ ok: true, text: '✓ Password updated' }); setNewPw(''); setTimeout(() => setPwMsg(null), 3000) }
+  }
 
   // Sync inputs when the household loads/changes (initial useState runs before data may be ready)
   useEffect(() => {
@@ -126,6 +140,23 @@ export default function Settings() {
         <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>Your Profile</div>
         <div style={{ fontSize: '0.88rem', color: 'var(--text)' }}>{member?.display_name || 'No name set'}</div>
         <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{member?.role}</div>
+      </div>
+
+      {/* Change password */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
+        <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Change Your Password</div>
+        {pwMsg && (
+          <div style={{ fontSize: '0.75rem', color: pwMsg.ok ? 'var(--green)' : '#e07060', marginBottom: '0.6rem' }}>{pwMsg.text}</div>
+        )}
+        <input
+          type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password"
+          style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.55rem 0.7rem', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', marginBottom: '0.6rem' }}
+        />
+        <button onClick={changePassword} disabled={pwSaving || !newPw}
+          style={{ width: '100%', background: newPw ? 'var(--accent)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: newPw ? '#0d1a10' : 'var(--muted)', fontWeight: 700, fontSize: '0.85rem' }}>
+          {pwSaving ? 'Updating…' : 'Update Password'}
+        </button>
+        <div style={{ fontSize: '0.66rem', color: 'var(--muted)', marginTop: '0.5rem' }}>Changes the password for the account you're signed in as ({member?.display_name || 'you'}).</div>
       </div>
 
       {/* Sign out */}
