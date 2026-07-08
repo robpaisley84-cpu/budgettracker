@@ -53,6 +53,13 @@ export function AuthProvider({ children }) {
     return supabase.auth.signInWithPassword({ email, password })
   }
 
+  async function signInWithGoogle() {
+    return supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    })
+  }
+
   async function signUp(email, password, displayName) {
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error || !data.user) return { error }
@@ -115,7 +122,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, household, member, loading, signIn, signUp, joinHousehold, updateHousehold, signOut }}>
+    <AuthContext.Provider value={{ user, household, member, loading, signIn, signInWithGoogle, signUp, joinHousehold, updateHousehold, signOut }}>
       {children}
     </AuthContext.Provider>
   )
