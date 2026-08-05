@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO, differenceInCalendarDays } from 'date-fns'
+import { computeAccrual, isAutoAccrued } from '../lib/accrual'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -62,7 +63,7 @@ export default function Dashboard() {
     const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
-      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
+      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
 
     // This month's expenses (for monthly metrics)
@@ -96,12 +97,21 @@ export default function Dashboard() {
 
     // Build envelope funds list
     // Fund Balance = (Monthly Budget × Months Through Selected Month) - Total YTD Spent
+    // Accruing bills track their own cycle, so their balance comes from the
+    // accrual (which zeroes at each payment) rather than the calendar-year
+    // envelope — otherwise a rate change would retroactively rewrite history.
+    const asOf = endOfMonth(viewMonth)
+
     const fundsList = (items || []).map(item => {
-      const monthlyBudget = +item.budgeted_amount
-      const totalAllocated = monthlyBudget * selectedMonthNum
+      const calc = computeAccrual(item, asOf)
       const ytdSpent = ytdActuals[item.id] || 0
       const thisMonthSpent = monthActuals[item.id] || 0
-      const fundBalance = totalAllocated - ytdSpent
+
+      const monthlyBudget  = calc ? calc.accrual : +item.budgeted_amount
+      const totalAllocated = calc ? calc.accrued : monthlyBudget * selectedMonthNum
+      // Payments are already reflected by the cycle reset on an accruing bill,
+      // so subtracting YTD spend here would double-count them.
+      const fundBalance    = calc ? calc.accrued : totalAllocated - ytdSpent
 
       return {
         id: item.id,
@@ -111,6 +121,9 @@ export default function Dashboard() {
         ytdSpent,
         thisMonthSpent,
         fundBalance,
+        accruing: !!calc,
+        accrualTarget: calc?.target ?? null,
+        accrualDue: calc?.nextDue ?? null,
         isPinned: item.is_pinned || false,
         sortOrder: item.fund_sort_order || 0,
         category: item.category?.name || '',
@@ -145,13 +158,23 @@ export default function Dashboard() {
     // Upcoming annual/quarterly bills (reminders)
     const { data: periodicItems } = await supabase
       .from('budget_items')
-      .select('id, name, budgeted_amount, next_due_date, bill_frequency, category:budget_categories(icon)')
+      .select('id, name, budgeted_amount, next_due_date, bill_frequency, bill_amount, interval_months, last_paid_date, auto_accrue, saved_so_far, saved_as_of, category:budget_categories(icon)')
       .eq('household_id', household.id)
       .eq('is_active', true)
-      .in('bill_frequency', ['annual', 'quarterly'])
+      .gt('interval_months', 1)
       .not('next_due_date', 'is', null)
     const soon = (periodicItems || [])
-      .map(i => ({ ...i, daysUntil: differenceInCalendarDays(parseISO(i.next_due_date), new Date()) }))
+      .map(i => {
+        const calc = computeAccrual(i)
+        // Show the real charge and the rolled-forward date, not the stale row
+        return {
+          ...i,
+          dueDate: calc ? calc.nextDue : parseISO(i.next_due_date),
+          dueAmount: calc ? calc.target : +i.budgeted_amount,
+          shortfall: calc ? Math.max(0, calc.target - calc.accrued) : 0,
+          daysUntil: calc ? calc.daysUntil : differenceInCalendarDays(parseISO(i.next_due_date), new Date()),
+        }
+      })
       .filter(i => i.daysUntil <= 45)
       .sort((a, b) => a.daysUntil - b.daysUntil)
       .slice(0, 4)
@@ -284,8 +307,12 @@ export default function Dashboard() {
             return (
               <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
                 <span style={{ fontSize: '0.85rem' }}>{i.category?.icon || '📄'}</span>
-                <span style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text)' }}>{i.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--muted)' }}>{format(parseISO(i.next_due_date), 'MMM d')}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text)' }}>{i.name}</div>
+                  {i.shortfall > 0 && <div style={{ fontSize: '0.6rem', color: 'var(--amber)' }}>{fmt(i.shortfall)} still to set aside</div>}
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--accentL)' }}>{fmt(i.dueAmount)}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--muted)' }}>{format(i.dueDate, 'MMM d')}</span>
                 <span style={{ fontSize: '0.68rem', color: c, minWidth: '3.2rem', textAlign: 'right' }}>{past ? `${Math.abs(i.daysUntil)}d over` : i.daysUntil === 0 ? 'today' : `in ${i.daysUntil}d`}</span>
               </div>
             )

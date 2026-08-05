@@ -25,8 +25,17 @@ function describe(e) {
     if (op === 'INSERT') return { icon: '➕', text: `added budget line "${name}"` }
     if (op === 'DELETE') return { icon: '🗑️', text: `deleted budget line "${name}"` }
     if (o.is_active !== false && n.is_active === false) return { icon: '🗑️', text: `removed "${name}"` }
-    if (+o.budgeted_amount !== +n.budgeted_amount) return { icon: '✏️', text: `changed "${name}" budget: ${money(o.budgeted_amount)} → ${money(n.budgeted_amount)}` }
+    if (o.last_paid_date != n.last_paid_date && n.last_paid_date) return { icon: '✅', text: `marked "${name}" paid ${n.last_paid_date} — fund reset, next cycle started` }
+    if (+o.bill_amount !== +n.bill_amount) return { icon: '🧾', text: `set "${name}" bill amount: ${money(o.bill_amount)} → ${money(n.bill_amount)}` }
+    // The recalc writes budgeted_amount on its own — don't report it as a person's edit
+    if (+o.budgeted_amount !== +n.budgeted_amount) {
+      const autoCalc = n.auto_accrue && +n.interval_months > 1
+      return autoCalc
+        ? { icon: '🔄', text: `auto-accrual for "${name}" recalculated: ${money(o.budgeted_amount)} → ${money(n.budgeted_amount)}/mo` }
+        : { icon: '✏️', text: `changed "${name}" budget: ${money(o.budgeted_amount)} → ${money(n.budgeted_amount)}` }
+    }
     if (o.name !== n.name) return { icon: '✏️', text: `renamed "${o.name}" → "${n.name}"` }
+    if (o.interval_months != n.interval_months) return { icon: '🗓️', text: `set "${name}" to recur every ${n.interval_months} month${+n.interval_months === 1 ? '' : 's'}` }
     if (o.due_day != n.due_day || o.next_due_date != n.next_due_date || o.bill_frequency != n.bill_frequency) return { icon: '🗓️', text: `updated due date for "${name}"` }
     if (o.is_pinned != n.is_pinned) return { icon: '📌', text: `${n.is_pinned ? 'pinned' : 'unpinned'} "${name}"` }
     return { icon: '✏️', text: `updated "${name}"` }

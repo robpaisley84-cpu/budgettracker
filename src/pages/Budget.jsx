@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { isAutoAccrued, intervalLabel } from '../lib/accrual'
 import { format, addMonths, subMonths } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
@@ -180,7 +182,10 @@ export default function Budget() {
                     const spent = actuals[item.id] || 0
                     const left  = +item.budgeted_amount - spent
                     const isOver = spent > +item.budgeted_amount
-                    const isEditing = editing === item.id
+                    // Accruing bills own their own number — editing it here would
+                    // just get overwritten on the next recalc, so send them to Bills.
+                    const auto = isAutoAccrued(item)
+                    const isEditing = editing === item.id && !auto
 
                     return (
                       <div key={item.id} style={{ display: 'flex', padding: '0.42rem 0.9rem', borderBottom: idx < items.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none', alignItems: 'center', gap: '0.5rem' }}>
@@ -201,6 +206,10 @@ export default function Budget() {
                                 <button onClick={() => saveItemAmount(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: '#0d1a10', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
                                 <button onClick={() => setEditing(null)} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
                               </span>
+                            ) : auto ? (
+                              <Link to="/bills" style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)', textDecoration: 'none' }} title={`Auto-accrued from a ${intervalLabel(item.interval_months).toLowerCase()} bill of ${fmt(item.bill_amount)} — edit it on the Bills page`}>
+                                {fmt(item.budgeted_amount)} <span style={{ fontSize: '0.6rem', color: 'var(--accent)' }}>🔄 auto</span>
+                              </Link>
                             ) : (
                               <span onClick={() => { setEditing(item.id); setEditVal(item.budgeted_amount) }} style={{ fontFamily: 'var(--font-mono)', cursor: 'pointer', borderBottom: '1px dashed var(--muted)' }}>{fmt(item.budgeted_amount)}</span>
                             )}
