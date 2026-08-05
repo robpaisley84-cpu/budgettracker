@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [ytd, setYtd]                 = useState({ budgeted: 0, spent: 0, months: 0 })
   const [monthlyBreakdown, setMonthlyBreakdown] = useState([])
   const [dueSoon, setDueSoon]         = useState([])
+  const [tierTotals, setTierTotals]   = useState({ essential: 0, lifestyle: 0, savings: 0 })
   const [loading, setLoading]         = useState(true)
   const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
@@ -63,7 +64,7 @@ export default function Dashboard() {
     const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
-      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
+      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
 
     // This month's expenses (for monthly metrics)
@@ -186,6 +187,9 @@ export default function Dashboard() {
     setYtd({ budgeted: ytdBudgeted, spent: ytdSpentTotal, months: selectedMonthNum })
     setMonthlyBreakdown(breakdown)
     setDueSoon(soon)
+    const tierT = { essential: 0, lifestyle: 0, savings: 0 }
+    ;(items || []).forEach(i => { tierT[i.tier || 'essential'] += +i.budgeted_amount })
+    setTierTotals(tierT)
     setLoading(false)
   }
 
@@ -291,6 +295,35 @@ export default function Dashboard() {
               ? `Income (${fmt(NET_MO)}) is under budget (${fmt(summary.budgeted)}) — cover the gap from last month's surplus.`
               : `Income covers the budget — set this aside for lean months.`}
           </div>
+        </div>
+      </div>
+
+      {/* Priorities vs income (tiers) */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
+        <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Priorities vs income</div>
+        {(() => {
+          const rows = [
+            { k: 'essential', label: 'Essentials',    color: '#5a9a6a' },
+            { k: 'lifestyle', label: 'Lifestyle',     color: '#c8954a' },
+            { k: 'savings',   label: 'Savings goals', color: '#8a5ab0' },
+          ]
+          let cum = 0
+          return rows.map((t, i) => {
+            cum += tierTotals[t.k] || 0
+            const covered = cum <= NET_MO
+            const isSavings = t.k === 'savings'
+            return (
+              <div key={t.k} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: t.color, flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text)' }}>{t.label}{isSavings && <span style={{ fontSize: '0.6rem', color: 'var(--muted)' }}> · bonus-funded</span>}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: t.color }}>{fmt(tierTotals[t.k] || 0)}</span>
+                <span style={{ fontSize: '0.7rem', minWidth: '1.2rem', textAlign: 'right', color: isSavings ? 'var(--muted)' : covered ? 'var(--green)' : 'var(--amber)' }}>{isSavings ? '·' : covered ? '✓' : '△'}</span>
+              </div>
+            )
+          })
+        })()}
+        <div style={{ fontSize: '0.64rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
+          ✓ = covered by this month's income ({fmt(NET_MO)}). Savings goals are meant for bonuses &amp; 3-paycheck months.
         </div>
       </div>
 

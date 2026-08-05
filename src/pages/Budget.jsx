@@ -7,6 +7,13 @@ import { format, addMonths, subMonths } from 'date-fns'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
+const TIERS = {
+  essential: { label: 'Essentials', short: 'E', color: '#5a9a6a' },
+  lifestyle: { label: 'Lifestyle',  short: 'L', color: '#c8954a' },
+  savings:   { label: 'Savings',    short: 'S', color: '#8a5ab0' },
+}
+const TIER_ORDER = ['essential', 'lifestyle', 'savings']
+
 export default function Budget() {
   const { household } = useAuth()
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -94,6 +101,13 @@ export default function Budget() {
     load()
   }
 
+  // Tap a line's tier chip to move it between Essentials → Lifestyle → Savings
+  async function cycleTier(item) {
+    const next = TIER_ORDER[(TIER_ORDER.indexOf(item.tier || 'essential') + 1) % TIER_ORDER.length]
+    await supabase.from('budget_items').update({ tier: next }).eq('id', item.id)
+    load()
+  }
+
   async function addCategory() {
     if (!form.catName) return
     setSaving(true)
@@ -118,8 +132,11 @@ export default function Budget() {
 
   const toggle = (id) => setExpanded(e => ({ ...e, [id]: !e[id] }))
 
-  const totalBudgeted = categories.flatMap(c => (c.items || []).filter(i => i.is_active !== false)).reduce((s, i) => s + +i.budgeted_amount, 0)
+  const activeItems  = categories.flatMap(c => (c.items || []).filter(i => i.is_active !== false))
+  const totalBudgeted = activeItems.reduce((s, i) => s + +i.budgeted_amount, 0)
   const totalSpent    = Object.values(actuals).reduce((s, v) => s + v, 0)
+  const tierTotals = { essential: 0, lifestyle: 0, savings: 0 }
+  activeItems.forEach(i => { tierTotals[i.tier || 'essential'] += +i.budgeted_amount })
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
@@ -141,6 +158,14 @@ export default function Budget() {
             <div key={x.l}>
               <div style={{ color: 'var(--muted)', fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{x.l}</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: x.c, fontWeight: 500 }}>{x.v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', marginTop: '0.5rem', textAlign: 'center' }}>
+          {TIER_ORDER.map(t => (
+            <div key={t}>
+              <div style={{ color: TIERS[t].color, fontSize: '0.58rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{TIERS[t].label}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: TIERS[t].color }}>{fmt(tierTotals[t])}</div>
             </div>
           ))}
         </div>
@@ -219,6 +244,10 @@ export default function Budget() {
                         {spent > 0 && (
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: isOver ? 'var(--red)' : 'var(--accentL)' }}>{fmt(spent)}</span>
                         )}
+                        <button onClick={() => cycleTier(item)} title={`${TIERS[item.tier || 'essential'].label} — tap to change tier`}
+                          style={{ background: 'transparent', border: `1px solid ${TIERS[item.tier || 'essential'].color}`, color: TIERS[item.tier || 'essential'].color, borderRadius: '4px', fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.32rem', fontFamily: 'var(--font-mono)' }}>
+                          {TIERS[item.tier || 'essential'].short}
+                        </button>
                         <button onClick={() => deleteItem(item.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.65rem', padding: '0.1rem 0.3rem', opacity: 0.4 }} title="Remove item">✕</button>
                       </div>
                     )
