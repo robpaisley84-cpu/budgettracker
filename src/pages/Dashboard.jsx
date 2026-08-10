@@ -252,6 +252,7 @@ export default function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--accent)', textTransform: 'uppercase' }}>Road Budget</div>
           <div style={{ display: 'flex', gap: '1rem' }}>
+            <Link to="/help" title="How it works" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>❓</Link>
             <Link to="/activity" title="Activity" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>📜</Link>
             <Link to="/settings" title="Settings" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>⚙️</Link>
           </div>

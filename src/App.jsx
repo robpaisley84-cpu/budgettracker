@@ -5,6 +5,7 @@ import Dashboard  from './pages/Dashboard'
 import Budget     from './pages/Budget'
 import Bills      from './pages/Bills'
 import Activity   from './pages/Activity'
+import Help       from './pages/Help'
 import Accounts   from './pages/Accounts'
 import Transactions from './pages/Transactions'
 import Allocations  from './pages/Allocations'
@@ -38,6 +39,7 @@ function AppShell() {
         <Route path="/budget"       element={<RequireAuth><Budget /></RequireAuth>} />
         <Route path="/bills"        element={<RequireAuth><Bills /></RequireAuth>} />
         <Route path="/activity"     element={<RequireAuth><Activity /></RequireAuth>} />
+        <Route path="/help"         element={<RequireAuth><Help /></RequireAuth>} />
         <Route path="/accounts"     element={<RequireAuth><Accounts /></RequireAuth>} />
         <Route path="/transactions" element={<RequireAuth><Transactions /></RequireAuth>} />
         <Route path="/allocations"  element={<RequireAuth><Allocations /></RequireAuth>} />
