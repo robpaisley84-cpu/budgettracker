@@ -47,7 +47,11 @@ export default function Help() {
       </Task>
 
       <Task icon="✏️" title="Change what you budget for something">
-        On <b>Budget</b>, tap the dollar amount under any line and type a new number. To add or remove a line, use <b>+ Add line item</b> or the little ✕.
+        On <b>Budget</b>, tap the dollar amount under any line and type a new number. Tap the line's <b>name</b> to rename it, or the coloured chip to change its tier. To add or remove a line, use <b>+ Add line item</b> or the little ✕ — removing asks you to confirm first.
+      </Task>
+
+      <Task icon="🎯" title="Tell the app what a fund really holds">
+        The home screen estimates each fund by adding up your monthly budget since you started, minus what you've spent. If a fund actually holds a different amount, tap its <b>name</b> under Funds Available and enter the real figure — everything from then on counts up from there. Same on <b>Accounts</b>: tap a card to set its true balance.
       </Task>
 
       {/* Home screen */}

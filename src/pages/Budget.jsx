@@ -23,6 +23,10 @@ export default function Budget() {
   const [loading, setLoading]         = useState(true)
   const [editing, setEditing]         = useState(null)
   const [editVal, setEditVal]         = useState('')
+  const [renaming, setRenaming]       = useState(null)
+  const [renameVal, setRenameVal]     = useState('')
+  const [confirmDel, setConfirmDel]   = useState(null)
+  const [confirmCat, setConfirmCat]   = useState(null)
   const [showAddItem, setShowAddItem] = useState(null)
   const [showAddCat, setShowAddCat]   = useState(false)
   const [form, setForm]               = useState({})
@@ -74,6 +78,17 @@ export default function Budget() {
     await supabase.from('budget_items').update({ budgeted_amount: +editVal }).eq('id', itemId)
     setEditing(null)
     setEditVal('')
+    setSaving(false)
+    load()
+  }
+
+  async function saveItemName(itemId) {
+    const name = renameVal.trim()
+    if (!name) { setRenaming(null); setRenameVal(''); return }
+    setSaving(true)
+    await supabase.from('budget_items').update({ name }).eq('id', itemId)
+    setRenaming(null)
+    setRenameVal('')
     setSaving(false)
     load()
   }
@@ -191,7 +206,17 @@ export default function Budget() {
                   </span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--muted)' }}> / {fmt(catBudget)}</span>
                 </div>
-                <button onClick={() => deleteCategory(cat.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.7rem', padding: '0.2rem', opacity: 0.5 }} title="Delete category">✕</button>
+                {confirmCat === cat.id ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span style={{ fontSize: '0.58rem', color: 'var(--red)' }}>Delete category and its {items.length} item{items.length === 1 ? '' : 's'}?</span>
+                    <button onClick={() => { setConfirmCat(null); deleteCategory(cat.id) }}
+                      style={{ background: 'var(--red)', border: 'none', borderRadius: '3px', color: '#fff', fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem' }}>Yes</button>
+                    <button onClick={() => setConfirmCat(null)}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.35rem' }}>No</button>
+                  </span>
+                ) : (
+                  <button onClick={() => setConfirmCat(cat.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.7rem', padding: '0.2rem', opacity: 0.5 }} title="Delete category">✕</button>
+                )}
                 <span onClick={() => toggle(cat.id)} style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{expanded[cat.id] ? '▲' : '▼'}</span>
               </div>
 
@@ -215,7 +240,22 @@ export default function Budget() {
                     return (
                       <div key={item.id} style={{ display: 'flex', padding: '0.42rem 0.9rem', borderBottom: idx < items.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none', alignItems: 'center', gap: '0.5rem' }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '0.8rem', color: 'var(--text)' }}>{item.name}</div>
+                          {renaming === item.id ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.1rem' }}>
+                              <input
+                                value={renameVal}
+                                onChange={e => setRenameVal(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') saveItemName(item.id); if (e.key === 'Escape') { setRenaming(null); setRenameVal('') } }}
+                                autoFocus
+                                style={{ flex: 1, minWidth: 0, width: '9rem', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '0.15rem 0.35rem', color: 'var(--text)', fontSize: '0.78rem', outline: 'none' }}
+                              />
+                              <button onClick={() => saveItemName(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: '#0d1a10', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
+                              <button onClick={() => { setRenaming(null); setRenameVal('') }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
+                            </span>
+                          ) : (
+                            <div onClick={() => { setRenaming(item.id); setRenameVal(item.name) }} title="Tap to rename"
+                              style={{ fontSize: '0.8rem', color: 'var(--text)', cursor: 'pointer' }}>{item.name}</div>
+                          )}
                           <div style={{ fontSize: '0.63rem', color: 'var(--muted)' }}>
                             Budget: {isEditing ? (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -244,11 +284,23 @@ export default function Budget() {
                         {spent > 0 && (
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: isOver ? 'var(--red)' : 'var(--accentL)' }}>{fmt(spent)}</span>
                         )}
-                        <button onClick={() => cycleTier(item)} title={`${TIERS[item.tier || 'essential'].label} — tap to change tier`}
-                          style={{ background: 'transparent', border: `1px solid ${TIERS[item.tier || 'essential'].color}`, color: TIERS[item.tier || 'essential'].color, borderRadius: '4px', fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.32rem', fontFamily: 'var(--font-mono)' }}>
-                          {TIERS[item.tier || 'essential'].short}
-                        </button>
-                        <button onClick={() => deleteItem(item.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.65rem', padding: '0.1rem 0.3rem', opacity: 0.4 }} title="Remove item">✕</button>
+                        {confirmDel === item.id ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <span style={{ fontSize: '0.58rem', color: 'var(--muted)' }}>Remove?</span>
+                            <button onClick={() => { setConfirmDel(null); deleteItem(item.id) }}
+                              style={{ background: 'var(--red)', border: 'none', borderRadius: '3px', color: '#fff', fontSize: '0.55rem', fontWeight: 700, padding: '0.1rem 0.35rem' }}>Yes</button>
+                            <button onClick={() => setConfirmDel(null)}
+                              style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.35rem' }}>No</button>
+                          </span>
+                        ) : (
+                          <>
+                            <button onClick={() => cycleTier(item)} title={`${TIERS[item.tier || 'essential'].label} — tap to change tier`}
+                              style={{ background: 'transparent', border: `1px solid ${TIERS[item.tier || 'essential'].color}`, color: TIERS[item.tier || 'essential'].color, borderRadius: '4px', fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.32rem', fontFamily: 'var(--font-mono)' }}>
+                              {TIERS[item.tier || 'essential'].short}
+                            </button>
+                            <button onClick={() => setConfirmDel(item.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.65rem', padding: '0.1rem 0.3rem', opacity: 0.4 }} title="Remove item">✕</button>
+                          </>
+                        )}
                       </div>
                     )
                   })}
