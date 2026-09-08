@@ -8,9 +8,9 @@ import { format, addMonths, subMonths } from 'date-fns'
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
 const TIERS = {
-  essential: { label: 'Essentials', short: 'E', color: '#5a9a6a' },
-  lifestyle: { label: 'Lifestyle',  short: 'L', color: '#c8954a' },
-  savings:   { label: 'Savings',    short: 'S', color: '#8a5ab0' },
+  essential: { label: 'Essentials', short: 'E', color: 'var(--tierE)' },
+  lifestyle: { label: 'Lifestyle',  short: 'L', color: 'var(--tierL)' },
+  savings:   { label: 'Savings',    short: 'S', color: 'var(--tierS)' },
 }
 const TIER_ORDER = ['essential', 'lifestyle', 'savings']
 
@@ -116,7 +116,7 @@ export default function Budget() {
     load()
   }
 
-  // Tap a line's tier chip to move it between Essentials → Lifestyle → Savings
+  // Tap a line's tier chip to move it between Essentials Ã¢â€ â€™ Lifestyle Ã¢â€ â€™ Savings
   async function cycleTier(item) {
     const next = TIER_ORDER[(TIER_ORDER.indexOf(item.tier || 'essential') + 1) % TIER_ORDER.length]
     await supabase.from('budget_items').update({ tier: next }).eq('id', item.id)
@@ -129,7 +129,7 @@ export default function Budget() {
     await supabase.from('budget_categories').insert({
       household_id: household.id,
       name: form.catName,
-      icon: form.catIcon || '📋',
+      icon: form.catIcon || 'Ã°Å¸â€œâ€¹',
       color: form.catColor || '#4a9a5a',
       sort_order: categories.length + 1,
     })
@@ -153,16 +153,16 @@ export default function Budget() {
   const tierTotals = { essential: 0, lifestyle: 0, savings: 0 }
   activeItems.forEach(i => { tierTotals[i.tier || 'essential'] += +i.budgeted_amount })
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>LoadingÃ¢â‚¬Â¦</div>
 
   return (
     <div className="page" style={{ paddingBottom: '5.5rem' }}>
       {/* Header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg)', borderBottom: '1px solid var(--border)', padding: '0.85rem 0.85rem 0.7rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem' }}>
-          <button onClick={() => setCurrentDate(d => subMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>‹</button>
+          <button onClick={() => setCurrentDate(d => subMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>Ã¢â‚¬Â¹</button>
           <span style={{ flex: 1, textAlign: 'center', fontFamily: 'var(--font-display)', fontSize: '1rem', color: 'var(--accentL)' }}>{format(currentDate, 'MMMM yyyy')}</span>
-          <button onClick={() => setCurrentDate(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>›</button>
+          <button onClick={() => setCurrentDate(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>Ã¢â‚¬Âº</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', fontSize: '0.72rem', textAlign: 'center' }}>
           {[
@@ -202,7 +202,7 @@ export default function Budget() {
                 <span onClick={() => toggle(cat.id)} style={{ flex: 1, fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)' }}>{cat.name}</span>
                 <div onClick={() => toggle(cat.id)} style={{ textAlign: 'right' }}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: over ? 'var(--red)' : cat.color }}>
-                    {catSpent > 0 ? fmt(catSpent) : '—'}
+                    {catSpent > 0 ? fmt(catSpent) : 'Ã¢â‚¬â€'}
                   </span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--muted)' }}> / {fmt(catBudget)}</span>
                 </div>
@@ -215,9 +215,9 @@ export default function Budget() {
                       style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.35rem' }}>No</button>
                   </span>
                 ) : (
-                  <button onClick={() => setConfirmCat(cat.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.7rem', padding: '0.2rem', opacity: 0.5 }} title="Delete category">✕</button>
+                  <button onClick={() => setConfirmCat(cat.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.7rem', padding: '0.2rem', opacity: 0.5 }} title="Delete category">Ã¢Å“â€¢</button>
                 )}
-                <span onClick={() => toggle(cat.id)} style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{expanded[cat.id] ? '▲' : '▼'}</span>
+                <span onClick={() => toggle(cat.id)} style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{expanded[cat.id] ? 'Ã¢â€“Â²' : 'Ã¢â€“Â¼'}</span>
               </div>
 
               {catSpent > 0 && (
@@ -232,13 +232,13 @@ export default function Budget() {
                     const spent = actuals[item.id] || 0
                     const left  = +item.budgeted_amount - spent
                     const isOver = spent > +item.budgeted_amount
-                    // Accruing bills own their own number — editing it here would
+                    // Accruing bills own their own number Ã¢â‚¬â€ editing it here would
                     // just get overwritten on the next recalc, so send them to Bills.
                     const auto = isAutoAccrued(item)
                     const isEditing = editing === item.id && !auto
 
                     return (
-                      <div key={item.id} style={{ display: 'flex', padding: '0.42rem 0.9rem', borderBottom: idx < items.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none', alignItems: 'center', gap: '0.5rem' }}>
+                      <div key={item.id} style={{ display: 'flex', padding: '0.42rem 0.9rem', borderBottom: idx < items.length-1 ? '1px solid var(--hairline)' : 'none', alignItems: 'center', gap: '0.5rem' }}>
                         <div style={{ flex: 1 }}>
                           {renaming === item.id ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.1rem' }}>
@@ -249,8 +249,8 @@ export default function Budget() {
                                 autoFocus
                                 style={{ flex: 1, minWidth: 0, width: '9rem', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '0.15rem 0.35rem', color: 'var(--text)', fontSize: '0.78rem', outline: 'none' }}
                               />
-                              <button onClick={() => saveItemName(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: '#0d1a10', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
-                              <button onClick={() => { setRenaming(null); setRenameVal('') }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
+                              <button onClick={() => saveItemName(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: 'var(--onAccent)', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>Ã¢Å“â€œ</button>
+                              <button onClick={() => { setRenaming(null); setRenameVal('') }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>Ã¢Å“â€¢</button>
                             </span>
                           ) : (
                             <div onClick={() => { setRenaming(item.id); setRenameVal(item.name) }} title="Tap to rename"
@@ -268,20 +268,20 @@ export default function Budget() {
                                   autoFocus
                                   style={{ width: '70px', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '0.15rem 0.3rem', color: 'var(--accentL)', fontSize: '0.65rem', fontFamily: 'var(--font-mono)', outline: 'none' }}
                                 />
-                                <button onClick={() => saveItemAmount(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: '#0d1a10', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
-                                <button onClick={() => setEditing(null)} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
+                                <button onClick={() => saveItemAmount(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: 'var(--onAccent)', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>Ã¢Å“â€œ</button>
+                                <button onClick={() => setEditing(null)} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>Ã¢Å“â€¢</button>
                               </span>
                             ) : auto ? (
-                              <Link to="/bills" style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)', textDecoration: 'none' }} title={`Auto-accrued from a ${intervalLabel(item.interval_months).toLowerCase()} bill of ${fmt(item.bill_amount)} — edit it on the Bills page`}>
-                                {fmt(item.budgeted_amount)} <span style={{ fontSize: '0.6rem', color: 'var(--accent)' }}>🔄 auto</span>
+                              <Link to="/bills" style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)', textDecoration: 'none' }} title={`Auto-accrued from a ${intervalLabel(item.interval_months).toLowerCase()} bill of ${fmt(item.bill_amount)} Ã¢â‚¬â€ edit it on the Bills page`}>
+                                {fmt(item.budgeted_amount)} <span style={{ fontSize: '0.6rem', color: 'var(--accent)' }}>Ã°Å¸â€â€ž auto</span>
                               </Link>
                             ) : (
                               <span onClick={() => { setEditing(item.id); setEditVal(item.budgeted_amount) }} style={{ fontFamily: 'var(--font-mono)', cursor: 'pointer', borderBottom: '1px dashed var(--muted)' }}>{fmt(item.budgeted_amount)}</span>
                             )}
-                            {/* Shown even at zero spend — "what's left" is most
+                            {/* Shown even at zero spend Ã¢â‚¬â€ "what's left" is most
                                 useful at the start of a month, before anything
                                 has been logged against the line. */}
-                            {!isEditing && +item.budgeted_amount > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? '▲' : '▼'} {fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>}
+                            {!isEditing && +item.budgeted_amount > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? 'Ã¢â€“Â²' : 'Ã¢â€“Â¼'} {fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>}
                           </div>
                         </div>
                         {spent > 0 && (
@@ -297,17 +297,17 @@ export default function Budget() {
                           </span>
                         ) : (
                           <>
-                            <button onClick={() => cycleTier(item)} title={`${TIERS[item.tier || 'essential'].label} — tap to change tier`}
+                            <button onClick={() => cycleTier(item)} title={`${TIERS[item.tier || 'essential'].label} Ã¢â‚¬â€ tap to change tier`}
                               style={{ background: 'transparent', border: `1px solid ${TIERS[item.tier || 'essential'].color}`, color: TIERS[item.tier || 'essential'].color, borderRadius: '4px', fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.32rem', fontFamily: 'var(--font-mono)' }}>
                               {TIERS[item.tier || 'essential'].short}
                             </button>
-                            <button onClick={() => setConfirmDel(item.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.65rem', padding: '0.1rem 0.3rem', opacity: 0.4 }} title="Remove item">✕</button>
+                            <button onClick={() => setConfirmDel(item.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.65rem', padding: '0.1rem 0.3rem', opacity: 0.4 }} title="Remove item">Ã¢Å“â€¢</button>
                           </>
                         )}
                       </div>
                     )
                   })}
-                  <div style={{ padding: '0.35rem 0.9rem', borderTop: items.length > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                  <div style={{ padding: '0.35rem 0.9rem', borderTop: items.length > 0 ? '1px solid var(--hairline)' : 'none' }}>
                     <button onClick={() => { setShowAddItem(cat.id); setForm({}) }} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', padding: 0, cursor: 'pointer' }}>+ Add line item</button>
                   </div>
                 </div>
@@ -321,9 +321,9 @@ export default function Budget() {
 
       {/* Add item modal */}
       {showAddItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) setShowAddItem(null) }}>
-          <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
+          <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '1rem' }}>New Budget Line Item</div>
             {[
               { l: 'Item Name', k: 'name', p: 'e.g. New Expense' },
@@ -339,8 +339,8 @@ export default function Budget() {
               <input type="checkbox" checked={form.is_fixed || false} onChange={e => setForm(x => ({ ...x, is_fixed: e.target.checked }))} />
               Fixed expense (same every month)
             </label>
-            <button onClick={addItem} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-              {saving ? 'Saving…' : 'Add Item'}
+            <button onClick={addItem} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+              {saving ? 'SavingÃ¢â‚¬Â¦' : 'Add Item'}
             </button>
           </div>
         </div>
@@ -348,13 +348,13 @@ export default function Budget() {
 
       {/* Add category modal */}
       {showAddCat && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) setShowAddCat(false) }}>
-          <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
+          <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '1rem' }}>New Budget Category</div>
             {[
               { l: 'Category Name', k: 'catName', p: 'e.g. Entertainment' },
-              { l: 'Icon (emoji)', k: 'catIcon', p: '📋' },
+              { l: 'Icon (emoji)', k: 'catIcon', p: 'Ã°Å¸â€œâ€¹' },
               { l: 'Color (hex)', k: 'catColor', p: '#4a9a5a' },
             ].map(f => (
               <div key={f.k} style={{ marginBottom: '0.75rem' }}>
@@ -363,8 +363,8 @@ export default function Budget() {
                   style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.9rem', outline: 'none' }} />
               </div>
             ))}
-            <button onClick={addCategory} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-              {saving ? 'Saving…' : 'Add Category'}
+            <button onClick={addCategory} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+              {saving ? 'SavingÃ¢â‚¬Â¦' : 'Add Category'}
             </button>
           </div>
         </div>

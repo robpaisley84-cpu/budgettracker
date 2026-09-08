@@ -43,7 +43,7 @@ export default function Accounts() {
       household_id: household.id,
       name: form.name,
       type: form.type || 'checking',
-      icon: form.icon || '🏦',
+      icon: form.icon || 'Ã°Å¸ÂÂ¦',
       color: form.color || '#4a9a7a',
       target_balance: form.target ? +form.target : null,
       opening_balance: form.balance ? +form.balance : 0,
@@ -54,7 +54,7 @@ export default function Accounts() {
 
   // Balances are derived (opening_balance + history), so "true up" means
   // solving for the opening balance that makes today's derived figure match
-  // what the user says is really there — the same plug migration 012 used.
+  // what the user says is really there Ã¢â‚¬â€ the same plug migration 012 used.
   async function saveTrueUp() {
     const acc = modal === 'trueup' ? form.acc : null
     if (!acc || form.actual === '' || form.actual == null) return
@@ -79,14 +79,14 @@ export default function Accounts() {
     const fromAcc = accounts.find(a => a.id === form.from)
     const toAcc   = accounts.find(a => a.id === form.to)
 
-    // The transfer row is the whole record — both balances derive from it (012)
+    // The transfer row is the whole record Ã¢â‚¬â€ both balances derive from it (012)
     const { error } = await supabase.from('transactions').insert({
       household_id: household.id,
       account_id: form.from,
       to_account_id: form.to,
       type: 'transfer',
       amount: amt,
-      description: form.note || `Transfer: ${fromAcc?.name} → ${toAcc?.name}`,
+      description: form.note || `Transfer: ${fromAcc?.name} Ã¢â€ â€™ ${toAcc?.name}`,
       date: today, budget_month: month,
       created_by: user.id,
     })
@@ -102,15 +102,15 @@ export default function Accounts() {
 
   const totalBalance = accounts.reduce((s, a) => s + +a.balance, 0)
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>LoadingÃ¢â‚¬Â¦</div>
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
       {err && (
-        <div style={{ background: 'rgba(220,80,80,0.12)', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.6rem 0.75rem', marginBottom: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.85rem' }}>⚠️</span>
+        <div style={{ background: 'var(--dangerBg)', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.6rem 0.75rem', marginBottom: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.85rem' }}>Ã¢Å¡Â Ã¯Â¸Â</span>
           <div style={{ flex: 1, fontSize: '0.72rem', color: 'var(--text)', lineHeight: 1.45 }}>{err}</div>
-          <button onClick={() => setErr('')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1, padding: 0 }}>×</button>
+          <button onClick={() => setErr('')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1, padding: 0 }}>Ãƒâ€”</button>
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -119,8 +119,8 @@ export default function Accounts() {
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)' }}>Total: {fmt(totalBalance)}</div>
         </div>
         <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <button onClick={() => { setModal('transfer'); setForm({}) }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '7px', padding: '0.45rem 0.75rem', fontSize: '0.78rem' }}>↔ Transfer</button>
-          <button onClick={() => { setModal('add'); setForm({ type: 'checking', icon: '🏦' }) }} style={{ background: 'var(--accent)', border: 'none', color: '#0d1a10', borderRadius: '7px', padding: '0.45rem 0.75rem', fontSize: '0.78rem', fontWeight: 700 }}>+ Add</button>
+          <button onClick={() => { setModal('transfer'); setForm({}) }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '7px', padding: '0.45rem 0.75rem', fontSize: '0.78rem' }}>Ã¢â€ â€ Transfer</button>
+          <button onClick={() => { setModal('add'); setForm({ type: 'checking', icon: 'Ã°Å¸ÂÂ¦' }) }} style={{ background: 'var(--accent)', border: 'none', color: 'var(--onAccent)', borderRadius: '7px', padding: '0.45rem 0.75rem', fontSize: '0.78rem', fontWeight: 700 }}>+ Add</button>
         </div>
       </div>
 
@@ -158,9 +158,9 @@ export default function Accounts() {
 
       {/* Modal */}
       {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) { setModal(null); setForm({}) } }}>
-          <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
+          <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.25rem' }}>{modal === 'add' ? 'New Account' : modal === 'trueup' ? 'True up balance' : 'Transfer Funds'}</div>
 
             {modal === 'trueup' && form.acc && (
@@ -168,7 +168,7 @@ export default function Accounts() {
                 <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{form.acc.icon} {form.acc.name}</div>
                 <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
                   Showing <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{fmt(form.acc.balance)}</b> from an opening balance of {fmt(form.acc.opening_balance || 0)} plus everything logged since.
-                  Enter what the account really holds and the opening balance is adjusted to match — your transaction history is left alone.
+                  Enter what the account really holds and the opening balance is adjusted to match Ã¢â‚¬â€ your transaction history is left alone.
                 </div>
                 <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Actual balance today</label>
                 <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.85rem', marginBottom: '1rem' }}>
@@ -177,8 +177,8 @@ export default function Accounts() {
                     style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '1.3rem', fontFamily: 'var(--font-mono)', padding: '0.55rem 0' }} />
                 </div>
                 <button onClick={saveTrueUp} disabled={saving || form.actual === ''}
-                  style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-                  {saving ? 'Saving…' : 'Save balance'}
+                  style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+                  {saving ? 'SavingÃ¢â‚¬Â¦' : 'Save balance'}
                 </button>
               </>
             )}
@@ -189,7 +189,7 @@ export default function Accounts() {
                   { l: 'Account Name', k: 'name', p: 'e.g. Emergency Fund' },
                   { l: 'Starting Balance', k: 'balance', p: '0', type: 'number' },
                   { l: 'Goal / Target (optional)', k: 'target', p: '10000', type: 'number' },
-                  { l: 'Icon (emoji)', k: 'icon', p: '🏦' },
+                  { l: 'Icon (emoji)', k: 'icon', p: 'Ã°Å¸ÂÂ¦' },
                   { l: 'Color (hex)', k: 'color', p: '#4a9a7a' },
                 ].map(f => (
                   <div key={f.k} style={{ marginBottom: '0.75rem' }}>
@@ -207,8 +207,8 @@ export default function Accounts() {
                     <option value="fund">Fund / Goal</option>
                   </select>
                 </div>
-                <button onClick={addAccount} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-                  {saving ? 'Saving…' : 'Add Account'}
+                <button onClick={addAccount} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+                  {saving ? 'SavingÃ¢â‚¬Â¦' : 'Add Account'}
                 </button>
               </>
             )}
@@ -226,7 +226,7 @@ export default function Accounts() {
                     {f.type === 'select' ? (
                       <select value={form[f.k] || ''} onChange={e => setForm(x => ({ ...x, [f.k]: e.target.value }))}
                         style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="">Select account…</option>
+                        <option value="">Select accountÃ¢â‚¬Â¦</option>
                         {accounts.map(a => <option key={a.id} value={a.id}>{a.icon} {a.name} ({fmt(a.balance)})</option>)}
                       </select>
                     ) : (
@@ -235,8 +235,8 @@ export default function Accounts() {
                     )}
                   </div>
                 ))}
-                <button onClick={doTransfer} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-                  {saving ? 'Processing…' : 'Transfer Funds'}
+                <button onClick={doTransfer} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+                  {saving ? 'ProcessingÃ¢â‚¬Â¦' : 'Transfer Funds'}
                 </button>
               </>
             )}

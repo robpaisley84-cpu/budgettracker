@@ -1,20 +1,76 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Themes ────────────────────────────────────────────────────────────────
+   Two palettes drawn from the rig:
+
+   "Avalanche" (dark, default) — the truck's Avalanche grey: charcoal greys,
+   linen text, warm oak accent.
+   "Coastal Linen" (light) — the camper's interior decor package: linen and
+   off-white grounds, charcoal text, glazed-hardwood accent, Avalanche grey
+   as the structural mid-tone.
+
+   Every colour used in the app comes from here. --onAccent is the text that
+   sits ON an accent or green button, and it has to flip with the theme, which
+   is why it is a variable rather than the old hardcoded near-black.
+   ──────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --bg:       #0d1a10;
-  --card:     #152018;
-  --border:   #243028;
-  --text:     #dde8d8;
-  --muted:    #6a8a70;
-  --accent:   #c8a050;
-  --accentL:  #e8c070;
-  --green:    #4aaa6a;
-  --red:      #c05a40;
-  --amber:    #d4840a;
-  --radius:   10px;
+  --bg:        #1c1f21;
+  --bgAlt:     #15181a;
+  --card:      #23272a;
+  --sheet:     #2a2f33;
+  --nav:       #191d1f;
+  --border:    #333a3e;
+  --text:      #e8e4dc;
+  --muted:     #8a9298;
+  --accent:    #b08a5a;
+  --accentL:   #d6b48a;
+  --onAccent:  #1a1d1f;
+  --green:     #6e9c7a;
+  --red:       #c0614a;
+  --redL:      #e08a72;
+  --dangerBg:  #2e1815;
+  --amber:     #d19a3c;
+  /* Budget tiers — used as text, so they need a per-theme value */
+  --tierE:     #5a9a6a;
+  --tierL:     #c8954a;
+  --tierS:     #8a5ab0;
+  /* Barely-there divider inside a card, and the modal scrim */
+  --hairline:  rgba(255,255,255,0.05);
+  --scrim:     rgba(0,0,0,0.85);
+  --pinned:    rgba(200,160,80,0.05);
+  --radius:    10px;
   --font-display: 'Playfair Display', serif;
   --font-body:    'Lato', sans-serif;
   --font-mono:    'DM Mono', monospace;
+}
+
+:root[data-theme="light"] {
+  --bg:        #f4f1eb;
+  --bgAlt:     #eae6de;
+  --card:      #fbf9f5;
+  --sheet:     #ffffff;
+  --nav:       #fbf9f5;
+  --border:    #dcd5c9;
+  --text:      #2a2e30;
+  --muted:     #798086;
+  --accent:    #8c6b45;
+  /* On a light ground the "lighter accent" has to go darker to stay legible —
+     it is used as a foreground colour for headings and figures. */
+  --accentL:   #6e5537;
+  --onAccent:  #fbf9f5;
+  --green:     #3f7a55;
+  --red:       #a8452f;
+  --redL:      #8e3524;
+  --dangerBg:  #f7e4df;
+  --amber:     #a9761a;
+  /* Darkened so the tier chips and figures stay legible on linen */
+  --tierE:     #3d7a4f;
+  --tierL:     #8a6520;
+  --tierS:     #6b3f92;
+  --hairline:  rgba(0,0,0,0.07);
+  --scrim:     rgba(0,0,0,0.45);
+  --pinned:    rgba(140,107,69,0.07);
 }
 
 html, body, #root { height: 100%; }
@@ -31,6 +87,11 @@ body {
 input, button, select, textarea {
   font-family: var(--font-body);
 }
+
+/* Native controls follow the theme, so date pickers and number spinners
+   don't render as light widgets on the dark palette (or vice versa). */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
 
 button { cursor: pointer; }
 

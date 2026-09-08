@@ -1,20 +1,20 @@
 import { NavLink } from 'react-router-dom'
 
 const TABS = [
-  { to: '/',             icon: '📊', label: 'Dashboard' },
-  { to: '/budget',       icon: '📋', label: 'Budget'    },
-  { to: '/bills',        icon: '🗓️', label: 'Bills'     },
-  { to: '/accounts',     icon: '🏦', label: 'Accounts'  },
-  { to: '/transactions', icon: '💸', label: 'Log'       },
-  { to: '/allocations',  icon: '📅', label: 'Paycheck'  },
+  { to: '/',             icon: 'ðŸ“Š', label: 'Dashboard' },
+  { to: '/budget',       icon: 'ðŸ“‹', label: 'Budget'    },
+  { to: '/bills',        icon: 'ðŸ—“ï¸', label: 'Bills'     },
+  { to: '/accounts',     icon: 'ðŸ¦', label: 'Accounts'  },
+  { to: '/transactions', icon: 'ðŸ’¸', label: 'Log'       },
+  { to: '/allocations',  icon: 'ðŸ“…', label: 'Paycheck'  },
 ]
 
 export default function Nav() {
   return (
     <nav style={{
       position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
-      background: '#0f1e12',
-      borderTop: '1px solid #243028',
+      background: 'var(--nav)',
+      borderTop: '1px solid var(--border)',
       display: 'flex',
       maxWidth: '600px', margin: '0 auto',
       paddingBottom: 'env(safe-area-inset-bottom, 0)',
@@ -23,8 +23,8 @@ export default function Nav() {
         <NavLink key={t.to} to={t.to} end={t.to==='/'} style={({ isActive }) => ({
           flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
           padding: '0.55rem 0 0.5rem', textDecoration: 'none', gap: '0.15rem',
-          color: isActive ? '#c8a050' : '#6a8a70',
-          borderTop: isActive ? '2px solid #c8a050' : '2px solid transparent',
+          color: isActive ? 'var(--accent)' : 'var(--muted)',
+          borderTop: isActive ? '2px solid var(--accent)' : '2px solid transparent',
           transition: 'color 0.15s',
         })}>
           <span style={{ fontSize: '1.15rem' }}>{t.icon}</span>

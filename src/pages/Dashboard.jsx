@@ -69,7 +69,7 @@ export default function Dashboard() {
     const [{ data: accs }, { data: txns, error: txnErr }, { data: items }, { data: firstTxn }] = await Promise.all([
       // accounts_with_balance derives `balance` from transaction history (012)
       supabase.from('accounts_with_balance').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
-      // accounts must be embedded via account_id — transactions also has to_account_id
+      // accounts must be embedded via account_id Ã¢â‚¬â€ transactions also has to_account_id
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts!account_id(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
       supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
       // Oldest transaction = when this household started budgeting. Envelope
@@ -88,7 +88,7 @@ export default function Dashboard() {
       .eq('budget_month', month)
       .eq('type', 'expense')
 
-    // Calendar-year expenses per budget item — drives the YTD overview and the
+    // Calendar-year expenses per budget item Ã¢â‚¬â€ drives the YTD overview and the
     // month-by-month breakdown, which stay calendar-year by definition.
     const { data: ytdItemTxns } = await supabase
       .from('transactions')
@@ -116,7 +116,7 @@ export default function Dashboard() {
       .lte('budget_month', month)
 
     // Spend that postdates each fund's anchor. Where a real balance was stated
-    // on a date, compare against the date itself — spending earlier that month
+    // on a date, compare against the date itself Ã¢â‚¬â€ spending earlier that month
     // is already reflected in the figure the user gave.
     const anchoredSpend = {}
     const savedAsOf = {}
@@ -141,10 +141,10 @@ export default function Dashboard() {
     ytdItemTxns?.forEach(t => { monthMap[t.budget_month] = (monthMap[t.budget_month] || 0) + +t.amount })
 
     // Build envelope funds list
-    // Fund Balance = (Monthly Budget × Months Through Selected Month) - Total YTD Spent
+    // Fund Balance = (Monthly Budget Ãƒâ€” Months Through Selected Month) - Total YTD Spent
     // Accruing bills track their own cycle, so their balance comes from the
     // accrual (which zeroes at each payment) rather than the calendar-year
-    // envelope — otherwise a rate change would retroactively rewrite history.
+    // envelope Ã¢â‚¬â€ otherwise a rate change would retroactively rewrite history.
     const asOf = endOfMonth(viewMonth)
 
     const fundsList = (items || []).map(item => {
@@ -183,7 +183,7 @@ export default function Dashboard() {
         isPinned: item.is_pinned || false,
         sortOrder: item.fund_sort_order || 0,
         category: item.category?.name || '',
-        icon: item.category?.icon || '📋',
+        icon: item.category?.icon || 'Ã°Å¸â€œâ€¹',
         color: item.category?.color || 'var(--muted)',
       }
     }).sort((a, b) => {
@@ -237,7 +237,7 @@ export default function Dashboard() {
 
     // What this month is still committed to: fixed monthly bills that have not
     // been paid yet, plus set-asides still owed on longer-cycle bills. Flexible
-    // lines (groceries, fuel) are deliberately NOT counted — that remaining
+    // lines (groceries, fuel) are deliberately NOT counted Ã¢â‚¬â€ that remaining
     // budget is exactly the money "safe to spend" is meant to describe.
     let committedTotal = 0
     for (const it of items || []) {
@@ -287,7 +287,7 @@ export default function Dashboard() {
   const ytdDailyRate = ytd.months > 0 ? ytd.spent / (ytd.months * 30) : 0
   const projectedYearSpend = Math.round(ytdDailyRate * 365)
   const yearBudget = summary.budgeted * 12
-  const yearIncome = perCheck * (CHECKS_PER_YEAR[payFreq] || 26)  // true annual, not the current month × 12
+  const yearIncome = perCheck * (CHECKS_PER_YEAR[payFreq] || 26)  // true annual, not the current month Ãƒâ€” 12
 
   async function togglePin(itemId, currentlyPinned) {
     await supabase.from('budget_items').update({ is_pinned: !currentlyPinned }).eq('id', itemId)
@@ -335,7 +335,7 @@ export default function Dashboard() {
     load()
   }
 
-  // Drops the anchor — the fund falls back to accruing from the start of budgeting.
+  // Drops the anchor Ã¢â‚¬â€ the fund falls back to accruing from the start of budgeting.
   async function clearTrueUp() {
     if (!trueUp) return
     setTrueUpSaving(true)
@@ -347,7 +347,7 @@ export default function Dashboard() {
     load()
   }
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>LoadingÃ¢â‚¬Â¦</div>
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
@@ -356,22 +356,22 @@ export default function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--accent)', textTransform: 'uppercase' }}>Road Budget</div>
           <div style={{ display: 'flex', gap: '1rem' }}>
-            <Link to="/help" title="How it works" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>❓</Link>
-            <Link to="/activity" title="Activity" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>📜</Link>
-            <Link to="/settings" title="Settings" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>⚙️</Link>
+            <Link to="/help" title="How it works" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>Ã¢Ââ€œ</Link>
+            <Link to="/activity" title="Activity" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>Ã°Å¸â€œÅ“</Link>
+            <Link to="/settings" title="Settings" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>Ã¢Å¡â„¢Ã¯Â¸Â</Link>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button onClick={() => setViewMonth(d => subMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>‹</button>
+          <button onClick={() => setViewMonth(d => subMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>Ã¢â‚¬Â¹</button>
           <h1 style={{ flex: 1, fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', textAlign: 'center' }}>{format(viewMonth, 'MMMM yyyy')}</h1>
-          <button onClick={() => setViewMonth(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>›</button>
+          <button onClick={() => setViewMonth(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>Ã¢â‚¬Âº</button>
         </div>
       </div>
 
       {/* Key metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1rem' }}>
         {[
-          { l: `Monthly Income (${payCount}×)`, v: fmt(NET_MO), c: 'var(--green)' },
+          { l: `Monthly Income (${payCount}Ãƒâ€”)`, v: fmt(NET_MO), c: 'var(--green)' },
           { l: 'Spent This Month', v: fmt(summary.spent), c: 'var(--accentL)' },
           { l: 'Budget', v: fmt(summary.budgeted), c: 'var(--muted)' },
           { l: 'Income Left', v: fmt(buffer), c: bufColor },
@@ -383,7 +383,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Safe to spend — income left after everything still owed this month.
+      {/* Safe to spend Ã¢â‚¬â€ income left after everything still owed this month.
           "Income Left" above is income minus spend only, which counts unpaid
           bills as available; this is the number you can actually act on. */}
       <div style={{ background: 'var(--card)', border: `1px solid ${safeToSpend < 0 ? 'var(--red)' : 'var(--accent)'}`, borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
@@ -395,11 +395,11 @@ export default function Dashboard() {
         </div>
         <div style={{ fontSize: '0.62rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Income this month</span><span>{fmt(NET_MO)}</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Spent so far</span><span>−{fmt(summary.spent)}</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Bills &amp; set-asides still owed</span><span>−{fmt(committed)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Spent so far</span><span>Ã¢Ë†â€™{fmt(summary.spent)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Bills &amp; set-asides still owed</span><span>Ã¢Ë†â€™{fmt(committed)}</span></div>
         </div>
         <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginTop: '0.5rem', lineHeight: 1.45 }}>
-          Flexible lines like groceries aren't deducted — that's the money this figure is telling you about.
+          Flexible lines like groceries aren't deducted Ã¢â‚¬â€ that's the money this figure is telling you about.
         </div>
       </div>
 
@@ -417,8 +417,8 @@ export default function Dashboard() {
           <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textAlign: 'right', maxWidth: '60%', lineHeight: 1.4 }}>
             {payCount} paycheck{payCount !== 1 ? 's' : ''} this month.{' '}
             {monthNet < 0
-              ? `Income (${fmt(NET_MO)}) is under budget (${fmt(summary.budgeted)}) — cover the gap from last month's surplus.`
-              : `Income covers the budget — set this aside for lean months.`}
+              ? `Income (${fmt(NET_MO)}) is under budget (${fmt(summary.budgeted)}) Ã¢â‚¬â€ cover the gap from last month's surplus.`
+              : `Income covers the budget Ã¢â‚¬â€ set this aside for lean months.`}
           </div>
         </div>
       </div>
@@ -428,9 +428,9 @@ export default function Dashboard() {
         <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Priorities vs income</div>
         {(() => {
           const rows = [
-            { k: 'essential', label: 'Essentials',    color: '#5a9a6a' },
-            { k: 'lifestyle', label: 'Lifestyle',     color: '#c8954a' },
-            { k: 'savings',   label: 'Savings goals', color: '#8a5ab0' },
+            { k: 'essential', label: 'Essentials',    color: 'var(--tierE)' },
+            { k: 'lifestyle', label: 'Lifestyle',     color: 'var(--tierL)' },
+            { k: 'savings',   label: 'Savings goals', color: 'var(--tierS)' },
           ]
           let cum = 0
           return rows.map((t, i) => {
@@ -438,17 +438,17 @@ export default function Dashboard() {
             const covered = cum <= NET_MO
             const isSavings = t.k === 'savings'
             return (
-              <div key={t.k} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+              <div key={t.k} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: i > 0 ? '1px solid var(--hairline)' : 'none' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: t.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text)' }}>{t.label}{isSavings && <span style={{ fontSize: '0.6rem', color: 'var(--muted)' }}> · bonus-funded</span>}</span>
+                <span style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text)' }}>{t.label}{isSavings && <span style={{ fontSize: '0.6rem', color: 'var(--muted)' }}> Ã‚Â· bonus-funded</span>}</span>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: t.color }}>{fmt(tierTotals[t.k] || 0)}</span>
-                <span style={{ fontSize: '0.7rem', minWidth: '1.2rem', textAlign: 'right', color: isSavings ? 'var(--muted)' : covered ? 'var(--green)' : 'var(--amber)' }}>{isSavings ? '·' : covered ? '✓' : '△'}</span>
+                <span style={{ fontSize: '0.7rem', minWidth: '1.2rem', textAlign: 'right', color: isSavings ? 'var(--muted)' : covered ? 'var(--green)' : 'var(--amber)' }}>{isSavings ? 'Ã‚Â·' : covered ? 'Ã¢Å“â€œ' : 'Ã¢â€“Â³'}</span>
               </div>
             )
           })
         })()}
         <div style={{ fontSize: '0.64rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
-          ✓ = covered by this month's income ({fmt(NET_MO)}). Savings goals are meant for bonuses &amp; 3-paycheck months.
+          Ã¢Å“â€œ = covered by this month's income ({fmt(NET_MO)}). Savings goals are meant for bonuses &amp; 3-paycheck months.
         </div>
       </div>
 
@@ -456,15 +456,15 @@ export default function Dashboard() {
       {dueSoon.length > 0 && (
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>🔔 Due soon</div>
-            <Link to="/bills" style={{ fontSize: '0.65rem', color: 'var(--accent)', textDecoration: 'none' }}>All bills →</Link>
+            <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Ã°Å¸â€â€ Due soon</div>
+            <Link to="/bills" style={{ fontSize: '0.65rem', color: 'var(--accent)', textDecoration: 'none' }}>All bills Ã¢â€ â€™</Link>
           </div>
           {dueSoon.map((i, idx) => {
             const past = i.daysUntil < 0, urgent = i.daysUntil <= 14
             const c = past ? 'var(--red)' : urgent ? 'var(--amber)' : 'var(--muted)'
             return (
-              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: idx > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                <span style={{ fontSize: '0.85rem' }}>{i.category?.icon || '📄'}</span>
+              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: idx > 0 ? '1px solid var(--hairline)' : 'none' }}>
+                <span style={{ fontSize: '0.85rem' }}>{i.category?.icon || 'Ã°Å¸â€œâ€ž'}</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text)' }}>{i.name}</div>
                   {i.shortfall > 0 && <div style={{ fontSize: '0.6rem', color: 'var(--amber)' }}>{fmt(i.shortfall)} still to set aside</div>}
@@ -516,10 +516,10 @@ export default function Dashboard() {
       {/* YTD Overview */}
       <div style={{ marginBottom: '1rem' }}>
         <button onClick={() => setShowYtd(!showYtd)} style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: showYtd ? 'var(--radius) var(--radius) 0 0' : 'var(--radius)', padding: '0.75rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: 'var(--text)' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 400 }}>Year to Date — {format(viewMonth, 'yyyy')}</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 400 }}>Year to Date Ã¢â‚¬â€ {format(viewMonth, 'yyyy')}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: ytd.spent <= ytd.budgeted ? 'var(--green)' : 'var(--red)' }}>{fmt(ytd.spent)} / {fmt(ytd.budgeted)}</span>
-            <span style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{showYtd ? '▲' : '▼'}</span>
+            <span style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{showYtd ? 'Ã¢â€“Â²' : 'Ã¢â€“Â¼'}</span>
           </div>
         </button>
 
@@ -583,11 +583,11 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* True-up sheet — record what a fund actually holds right now */}
+      {/* True-up sheet Ã¢â‚¬â€ record what a fund actually holds right now */}
       {trueUp && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) setTrueUp(null) }}>
-          <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
+          <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>True up fund</div>
             <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{trueUp.name}</div>
 
@@ -607,8 +607,8 @@ export default function Dashboard() {
             </div>
 
             <button onClick={saveTrueUp} disabled={trueUpSaving || trueUpVal === ''}
-              style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-              {trueUpSaving ? 'Saving…' : 'Save balance'}
+              style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+              {trueUpSaving ? 'SavingÃ¢â‚¬Â¦' : 'Save balance'}
             </button>
 
             {trueUp.trued && (
@@ -621,7 +621,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Funds Available — envelope balances */}
+      {/* Funds Available Ã¢â‚¬â€ envelope balances */}
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Funds Available</h2>
@@ -629,32 +629,32 @@ export default function Dashboard() {
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: totalFundBalance >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
               {totalFundBalance < 0 ? '-' : ''}{fmt(totalFundBalance)}
             </span>
-            <button onClick={() => setEditFunds(!editFunds)} style={{ background: editFunds ? 'var(--accent)' : 'transparent', border: `1px solid ${editFunds ? 'var(--accent)' : 'var(--border)'}`, color: editFunds ? '#0d1a10' : 'var(--muted)', borderRadius: '5px', padding: '0.2rem 0.45rem', fontSize: '0.62rem', cursor: 'pointer', fontWeight: editFunds ? 700 : 400 }}>
+            <button onClick={() => setEditFunds(!editFunds)} style={{ background: editFunds ? 'var(--accent)' : 'transparent', border: `1px solid ${editFunds ? 'var(--accent)' : 'var(--border)'}`, color: editFunds ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '5px', padding: '0.2rem 0.45rem', fontSize: '0.62rem', cursor: 'pointer', fontWeight: editFunds ? 700 : 400 }}>
               {editFunds ? 'Done' : 'Reorder'}
             </button>
-            <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit →</Link>
+            <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit Ã¢â€ â€™</Link>
           </div>
         </div>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
           {visibleFunds.length === 0 && (
             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
-              No budget items yet — <Link to="/budget" style={{ color: 'var(--accent)' }}>set up your budget</Link>
+              No budget items yet Ã¢â‚¬â€ <Link to="/budget" style={{ color: 'var(--accent)' }}>set up your budget</Link>
             </div>
           )}
           {visibleFunds.map((f, i) => {
             const pct = f.totalAllocated > 0 ? Math.min((f.spent / f.totalAllocated) * 100, 100) : 0
             const balColor = f.fundBalance <= 0 ? 'var(--red)' : f.fundBalance < f.monthlyBudget * 0.5 ? 'var(--amber)' : 'var(--green)'
             return (
-              <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'rgba(200,160,80,0.04)' : 'transparent' }}>
+              <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'var(--pinned)' : 'transparent' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                   {editFunds && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                      <button onClick={() => moveFund(f.id, 'up')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▲</button>
-                      <button onClick={() => moveFund(f.id, 'down')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▼</button>
+                      <button onClick={() => moveFund(f.id, 'up')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>Ã¢â€“Â²</button>
+                      <button onClick={() => moveFund(f.id, 'down')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>Ã¢â€“Â¼</button>
                     </div>
                   )}
                   <button onClick={() => togglePin(f.id, f.isPinned)} style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', padding: 0, cursor: 'pointer', opacity: f.isPinned ? 1 : 0.35 }} title={f.isPinned ? 'Unpin' : 'Pin to top'}>
-                    {f.isPinned ? '⭐' : '☆'}
+                    {f.isPinned ? 'Ã¢Â­Â' : 'Ã¢Ëœâ€ '}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}
                     onClick={() => { if (!editFunds && !f.accruing) openTrueUp(f) }}
@@ -662,7 +662,7 @@ export default function Dashboard() {
                     title={!editFunds && !f.accruing ? 'Set the real balance' : undefined}>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds && !f.accruing ? 'pointer' : 'default' }}>
                       {f.name}
-                      {f.trued && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
+                      {f.trued && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> Ã¢Å“â€œ</span>}
                     </div>
                   </div>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: balColor }}>
@@ -675,7 +675,7 @@ export default function Dashboard() {
                   </div>
                   <div style={{ fontSize: '0.55rem', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
                     {fmt(f.spent)} spent / {fmt(f.totalAllocated)} alloc
-                    {f.thisMonthSpent > 0 && <span style={{ color: 'var(--accentL)' }}> · {fmt(f.thisMonthSpent)} this mo</span>}
+                    {f.thisMonthSpent > 0 && <span style={{ color: 'var(--accentL)' }}> Ã‚Â· {fmt(f.thisMonthSpent)} this mo</span>}
                   </div>
                 </div>
               </div>
@@ -698,7 +698,7 @@ export default function Dashboard() {
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Accounts</h2>
-          <Link to="/accounts" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Manage →</Link>
+          <Link to="/accounts" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Manage Ã¢â€ â€™</Link>
         </div>
         <div style={{ display: 'grid', gap: '0.5rem' }}>
           {accounts.map(a => (
@@ -713,7 +713,7 @@ export default function Dashboard() {
           ))}
           {accounts.length === 0 && (
             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1rem' }}>
-              No accounts yet — <Link to="/accounts" style={{ color: 'var(--accent)' }}>add one</Link>
+              No accounts yet Ã¢â‚¬â€ <Link to="/accounts" style={{ color: 'var(--accent)' }}>add one</Link>
             </div>
           )}
         </div>
@@ -723,23 +723,23 @@ export default function Dashboard() {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Recent</h2>
-          <Link to="/transactions" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>All →</Link>
+          <Link to="/transactions" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>All Ã¢â€ â€™</Link>
         </div>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
           {recentErr && (
-            <div style={{ fontSize: '0.72rem', color: 'var(--red)', padding: '1rem', lineHeight: 1.45 }}>⚠️ {recentErr}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--red)', padding: '1rem', lineHeight: 1.45 }}>Ã¢Å¡Â Ã¯Â¸Â {recentErr}</div>
           )}
           {recent.length === 0 && !recentErr && (
             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
-              No transactions this month — <Link to="/transactions" style={{ color: 'var(--accent)' }}>log one</Link>
+              No transactions this month Ã¢â‚¬â€ <Link to="/transactions" style={{ color: 'var(--accent)' }}>log one</Link>
             </div>
           )}
           {recent.map((t, i) => (
             <div key={t.id} style={{ display: 'flex', alignItems: 'center', padding: '0.65rem 0.9rem', borderBottom: i < recent.length-1 ? '1px solid var(--border)' : 'none', gap: '0.6rem' }}>
-              <span style={{ fontSize: '0.85rem' }}>{t.type === 'transfer' ? '↔️' : t.type === 'allocation' ? '📅' : t.type === 'income' ? '💵' : '💸'}</span>
+              <span style={{ fontSize: '0.85rem' }}>{t.type === 'transfer' ? 'Ã¢â€ â€Ã¯Â¸Â' : t.type === 'allocation' ? 'Ã°Å¸â€œâ€¦' : t.type === 'income' ? 'Ã°Å¸â€™Âµ' : 'Ã°Å¸â€™Â¸'}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || t.budget_item?.name || t.account?.name || '—'}</div>
-                <div style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>{format(new Date(t.date), 'MMM d')} · {t.type}</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || t.budget_item?.name || t.account?.name || 'Ã¢â‚¬â€'}</div>
+                <div style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>{format(new Date(t.date), 'MMM d')} Ã‚Â· {t.type}</div>
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: t.type === 'expense' ? 'var(--red)' : 'var(--green)', flexShrink: 0 }}>
                 {t.type === 'expense' ? '-' : '+'}{fmt(t.amount)}

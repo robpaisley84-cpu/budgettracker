@@ -15,8 +15,8 @@ import Nav          from './components/Nav'
 function RequireAuth({ children }) {
   const { user, household, loading } = useAuth()
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0d1a10', color: '#c8a050', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
-      Loading Road Budget…
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--accent)', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
+      Loading Road Budgetâ€¦
     </div>
   )
   if (!user) return <Navigate to="/auth" replace />
@@ -26,8 +26,8 @@ function RequireAuth({ children }) {
 function AppShell() {
   const { user, loading } = useAuth()
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0d1a10', color: '#c8a050', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
-      Loading Road Budget…
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--accent)', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
+      Loading Road Budgetâ€¦
     </div>
   )
   if (!user) return <Routes><Route path="*" element={<Auth />} /></Routes>

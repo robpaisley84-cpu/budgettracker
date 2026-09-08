@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { THEMES, getTheme, applyTheme } from '../lib/theme'
 
 const fmt2 = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -21,6 +22,8 @@ export default function Settings() {
   const [saving, setSaving]     = useState(false)
   const [savedAt, setSavedAt]   = useState(false)
 
+  const [theme, setTheme]       = useState(getTheme)
+
   const [newPw, setNewPw]       = useState('')
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMsg, setPwMsg]       = useState(null)  // { ok, text }
@@ -31,7 +34,7 @@ export default function Settings() {
     const { error } = await supabase.auth.updateUser({ password: newPw })
     setPwSaving(false)
     if (error) setPwMsg({ ok: false, text: error.message })
-    else { setPwMsg({ ok: true, text: '✓ Password updated' }); setNewPw(''); setTimeout(() => setPwMsg(null), 3000) }
+    else { setPwMsg({ ok: true, text: 'âœ“ Password updated' }); setNewPw(''); setTimeout(() => setPwMsg(null), 3000) }
   }
 
   // Sync inputs when the household loads/changes (initial useState runs before data may be ready)
@@ -71,6 +74,31 @@ export default function Settings() {
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
       <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', marginBottom: '1.25rem' }}>Settings</div>
 
+      {/* Colour scheme — per device, so you and Hayley can differ */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
+        <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>Colour Scheme</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+          {THEMES.map(t => {
+            const on = theme === t.k
+            return (
+              <button key={t.k} onClick={() => setTheme(applyTheme(t.k))}
+                style={{
+                  background: on ? 'var(--accent)' : 'transparent',
+                  border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                  color: on ? 'var(--onAccent)' : 'var(--muted)',
+                  borderRadius: '7px', padding: '0.55rem 0.5rem', textAlign: 'left',
+                }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: on ? 700 : 400 }}>{t.label}</div>
+                <div style={{ fontSize: '0.6rem', opacity: 0.85, marginTop: '0.1rem' }}>{t.hint}</div>
+              </button>
+            )
+          })}
+        </div>
+        <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginTop: '0.6rem', lineHeight: 1.45 }}>
+          Applies to this device only.
+        </div>
+      </div>
+
       {/* Income */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
         <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>Take-Home Pay</div>
@@ -92,7 +120,7 @@ export default function Settings() {
               style={{
                 background: freq === k ? 'var(--accent)' : 'transparent',
                 border: `1px solid ${freq === k ? 'var(--accent)' : 'var(--border)'}`,
-                color: freq === k ? '#0d1a10' : 'var(--muted)',
+                color: freq === k ? 'var(--onAccent)' : 'var(--muted)',
                 borderRadius: '7px', padding: '0.5rem', fontSize: '0.78rem', fontWeight: freq === k ? 700 : 400,
               }}>
               {v.label}
@@ -130,8 +158,8 @@ export default function Settings() {
         </div>
 
         <button onClick={saveIncome} disabled={saving || !dirty}
-          style={{ width: '100%', background: dirty ? 'var(--green)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.75rem', color: dirty ? '#0d1a10' : 'var(--muted)', fontWeight: 700, fontSize: '0.88rem' }}>
-          {saving ? 'Saving…' : savedAt ? '✓ Saved' : dirty ? 'Save Income' : 'Saved'}
+          style={{ width: '100%', background: dirty ? 'var(--green)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.75rem', color: dirty ? 'var(--onAccent)' : 'var(--muted)', fontWeight: 700, fontSize: '0.88rem' }}>
+          {saving ? 'Savingâ€¦' : savedAt ? 'âœ“ Saved' : dirty ? 'Save Income' : 'Saved'}
         </button>
       </div>
 
@@ -146,21 +174,21 @@ export default function Settings() {
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
         <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Change Your Password</div>
         {pwMsg && (
-          <div style={{ fontSize: '0.75rem', color: pwMsg.ok ? 'var(--green)' : '#e07060', marginBottom: '0.6rem' }}>{pwMsg.text}</div>
+          <div style={{ fontSize: '0.75rem', color: pwMsg.ok ? 'var(--green)' : 'var(--redL)', marginBottom: '0.6rem' }}>{pwMsg.text}</div>
         )}
         <input
           type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password"
           style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.55rem 0.7rem', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', marginBottom: '0.6rem' }}
         />
         <button onClick={changePassword} disabled={pwSaving || !newPw}
-          style={{ width: '100%', background: newPw ? 'var(--accent)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: newPw ? '#0d1a10' : 'var(--muted)', fontWeight: 700, fontSize: '0.85rem' }}>
-          {pwSaving ? 'Updating…' : 'Update Password'}
+          style={{ width: '100%', background: newPw ? 'var(--accent)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: newPw ? 'var(--onAccent)' : 'var(--muted)', fontWeight: 700, fontSize: '0.85rem' }}>
+          {pwSaving ? 'Updatingâ€¦' : 'Update Password'}
         </button>
         <div style={{ fontSize: '0.66rem', color: 'var(--muted)', marginTop: '0.5rem' }}>Changes the password for the account you're signed in as ({member?.display_name || 'you'}).</div>
       </div>
 
       {/* Sign out */}
-      <button onClick={signOut} style={{ width: '100%', background: 'transparent', border: '1px solid #c05a40', color: '#c05a40', borderRadius: 'var(--radius)', padding: '0.75rem', fontSize: '0.88rem', marginTop: '0.5rem' }}>
+      <button onClick={signOut} style={{ width: '100%', background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 'var(--radius)', padding: '0.75rem', fontSize: '0.88rem', marginTop: '0.5rem' }}>
         Sign Out
       </button>
     </div>
