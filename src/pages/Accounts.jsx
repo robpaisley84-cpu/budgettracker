@@ -52,6 +52,24 @@ export default function Accounts() {
     setSaving(false); setModal(null); setForm({})
   }
 
+  // Balances are derived (opening_balance + history), so "true up" means
+  // solving for the opening balance that makes today's derived figure match
+  // what the user says is really there — the same plug migration 012 used.
+  async function saveTrueUp() {
+    const acc = modal === 'trueup' ? form.acc : null
+    if (!acc || form.actual === '' || form.actual == null) return
+    setSaving(true)
+    const txnEffect = +acc.balance - (+acc.opening_balance || 0)
+    const newOpening = Math.round((+form.actual - txnEffect) * 100) / 100
+    const { error } = await supabase.from('accounts').update({ opening_balance: newOpening }).eq('id', acc.id)
+    if (error) {
+      setErr(`Couldn't update ${acc.name}: ${error.message}`)
+      setSaving(false)
+      return
+    }
+    setSaving(false); setModal(null); setForm({}); load()
+  }
+
   async function doTransfer() {
     if (!form.from || !form.to || !form.amount || form.from === form.to) return
     setSaving(true)
@@ -111,7 +129,9 @@ export default function Accounts() {
         {accounts.map(a => {
           const pct = a.target_balance ? Math.min((+a.balance / +a.target_balance) * 100, 100) : null
           return (
-            <div key={a.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem' }}>
+            <div key={a.id} onClick={() => { setModal('trueup'); setForm({ acc: a, actual: String(Math.round(+a.balance * 100) / 100) }) }}
+              role="button" title="Set the real balance"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: pct !== null ? '0.6rem' : 0 }}>
                 <span style={{ fontSize: '1.3rem' }}>{a.icon}</span>
                 <div style={{ flex: 1 }}>
@@ -141,7 +161,27 @@ export default function Accounts() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) { setModal(null); setForm({}) } }}>
           <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.25rem' }}>{modal === 'add' ? 'New Account' : 'Transfer Funds'}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.25rem' }}>{modal === 'add' ? 'New Account' : modal === 'trueup' ? 'True up balance' : 'Transfer Funds'}</div>
+
+            {modal === 'trueup' && form.acc && (
+              <>
+                <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{form.acc.icon} {form.acc.name}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
+                  Showing <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{fmt(form.acc.balance)}</b> from an opening balance of {fmt(form.acc.opening_balance || 0)} plus everything logged since.
+                  Enter what the account really holds and the opening balance is adjusted to match — your transaction history is left alone.
+                </div>
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Actual balance today</label>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.85rem', marginBottom: '1rem' }}>
+                  <span style={{ color: 'var(--accentL)', fontSize: '1.1rem', marginRight: '0.3rem' }}>$</span>
+                  <input type="number" step="0.01" value={form.actual ?? ''} autoFocus onChange={e => setForm(f => ({ ...f, actual: e.target.value }))} placeholder="0.00"
+                    style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '1.3rem', fontFamily: 'var(--font-mono)', padding: '0.55rem 0' }} />
+                </div>
+                <button onClick={saveTrueUp} disabled={saving || form.actual === ''}
+                  style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
+                  {saving ? 'Saving…' : 'Save balance'}
+                </button>
+              </>
+            )}
 
             {modal === 'add' && (
               <>

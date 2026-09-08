@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO, differenceInCalendarDays } from 'date-fns'
+import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO, differenceInCalendarDays, differenceInCalendarMonths } from 'date-fns'
 import { computeAccrual, isAutoAccrued } from '../lib/accrual'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
@@ -44,6 +44,9 @@ export default function Dashboard() {
   const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
   const [editFunds, setEditFunds]     = useState(false)
+  const [trueUp, setTrueUp]           = useState(null)   // fund being trued up
+  const [trueUpVal, setTrueUpVal]     = useState('')
+  const [trueUpSaving, setTrueUpSaving] = useState(false)
   const [viewMonth, setViewMonth]     = useState(new Date())
   const month = format(viewMonth, 'yyyy-MM')
   const isCurrentMonth = month === format(new Date(), 'yyyy-MM')
@@ -62,13 +65,19 @@ export default function Dashboard() {
     const janMonth = `${year}-01`
     const selectedMonthNum = parseInt(format(viewMonth, 'M'))
 
-    const [{ data: accs }, { data: txns, error: txnErr }, { data: items }] = await Promise.all([
+    const [{ data: accs }, { data: txns, error: txnErr }, { data: items }, { data: firstTxn }] = await Promise.all([
       // accounts_with_balance derives `balance` from transaction history (012)
       supabase.from('accounts_with_balance').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       // accounts must be embedded via account_id — transactions also has to_account_id
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts!account_id(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
       supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
+      // Oldest transaction = when this household started budgeting. Envelope
+      // funds accrue from here, not from January, so a mid-year start does not
+      // claim months of funding that never happened.
+      supabase.from('transactions').select('budget_month').eq('household_id', household.id).order('budget_month', { ascending: true }).limit(1),
     ])
+
+    const appStartMonth = firstTxn?.[0]?.budget_month || month
 
     // This month's expenses (for monthly metrics)
     const { data: monthTxns } = await supabase
@@ -78,7 +87,8 @@ export default function Dashboard() {
       .eq('budget_month', month)
       .eq('type', 'expense')
 
-    // YTD expenses per budget item (for envelope balances)
+    // Calendar-year expenses per budget item — drives the YTD overview and the
+    // month-by-month breakdown, which stay calendar-year by definition.
     const { data: ytdItemTxns } = await supabase
       .from('transactions')
       .select('budget_item_id, budget_month, amount')
@@ -86,6 +96,36 @@ export default function Dashboard() {
       .eq('type', 'expense')
       .gte('budget_month', janMonth)
       .lte('budget_month', month)
+
+    // Each fund accrues from its own anchor: an explicit "actual balance as of"
+    // date if one was recorded, otherwise the month budgeting began. Envelopes
+    // are running funds, so this can reach back past January.
+    const itemAnchor = {}
+    for (const it of items || []) {
+      itemAnchor[it.id] = it.saved_as_of ? it.saved_as_of.slice(0, 7) : appStartMonth
+    }
+    const fundFloor = [appStartMonth, ...Object.values(itemAnchor)].sort()[0] || month
+
+    const { data: fundTxns } = await supabase
+      .from('transactions')
+      .select('budget_item_id, budget_month, amount, date')
+      .eq('household_id', household.id)
+      .eq('type', 'expense')
+      .gte('budget_month', fundFloor)
+      .lte('budget_month', month)
+
+    // Spend that postdates each fund's anchor. Where a real balance was stated
+    // on a date, compare against the date itself — spending earlier that month
+    // is already reflected in the figure the user gave.
+    const anchoredSpend = {}
+    const savedAsOf = {}
+    for (const it of items || []) if (it.saved_as_of) savedAsOf[it.id] = it.saved_as_of
+    fundTxns?.forEach(t => {
+      const id = t.budget_item_id
+      if (!id || !itemAnchor[id]) return
+      const after = savedAsOf[id] ? t.date > savedAsOf[id] : t.budget_month >= itemAnchor[id]
+      if (after) anchoredSpend[id] = (anchoredSpend[id] || 0) + +t.amount
+    })
 
     // Monthly actuals for this month only (for monthly summary)
     const monthActuals = {}
@@ -108,23 +148,34 @@ export default function Dashboard() {
 
     const fundsList = (items || []).map(item => {
       const calc = computeAccrual(item, asOf)
-      const ytdSpent = ytdActuals[item.id] || 0
       const thisMonthSpent = monthActuals[item.id] || 0
+      const spent = calc ? (ytdActuals[item.id] || 0) : (anchoredSpend[item.id] || 0)
 
-      const monthlyBudget  = calc ? calc.accrual : +item.budgeted_amount
-      const totalAllocated = calc ? calc.accrued : monthlyBudget * selectedMonthNum
+      const monthlyBudget = calc ? calc.accrual : +item.budgeted_amount
+
+      // Months of funding since the anchor. A stated balance already covers its
+      // own month, so it counts 0 for that month; the start-of-budgeting default
+      // counts 1, because that month was funded too.
+      const anchorISO   = item.saved_as_of || `${itemAnchor[item.id] || month}-01`
+      const monthsFunded = Math.max(0,
+        differenceInCalendarMonths(viewMonth, parseISO(anchorISO)) + (item.saved_as_of ? 0 : 1))
+      const savedBase = item.saved_as_of ? (+item.saved_so_far || 0) : 0
+
+      const totalAllocated = calc ? calc.accrued : savedBase + monthlyBudget * monthsFunded
       // Payments are already reflected by the cycle reset on an accruing bill,
-      // so subtracting YTD spend here would double-count them.
-      const fundBalance    = calc ? calc.accrued : totalAllocated - ytdSpent
+      // so subtracting spend here would double-count them.
+      const fundBalance    = calc ? calc.accrued : totalAllocated - spent
 
       return {
         id: item.id,
         name: item.name,
         monthlyBudget,
         totalAllocated,
-        ytdSpent,
+        spent,
         thisMonthSpent,
         fundBalance,
+        anchorMonth: calc ? null : (itemAnchor[item.id] || month),
+        trued: !!item.saved_as_of,
         accruing: !!calc,
         accrualTarget: calc?.target ?? null,
         accrualDue: calc?.nextDue ?? null,
@@ -246,6 +297,35 @@ export default function Dashboard() {
 
   // Total envelope balance
   const totalFundBalance = funds.reduce((s, f) => s + f.fundBalance, 0)
+
+  function openTrueUp(f) {
+    setTrueUp(f)
+    setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
+  }
+
+  // Records what a fund really holds today and anchors future accrual to it.
+  async function saveTrueUp() {
+    if (!trueUp || trueUpVal === '') return
+    setTrueUpSaving(true)
+    await supabase.from('budget_items')
+      .update({ saved_so_far: +trueUpVal, saved_as_of: format(new Date(), 'yyyy-MM-dd') })
+      .eq('id', trueUp.id)
+    setTrueUpSaving(false)
+    setTrueUp(null)
+    load()
+  }
+
+  // Drops the anchor — the fund falls back to accruing from the start of budgeting.
+  async function clearTrueUp() {
+    if (!trueUp) return
+    setTrueUpSaving(true)
+    await supabase.from('budget_items')
+      .update({ saved_so_far: null, saved_as_of: null })
+      .eq('id', trueUp.id)
+    setTrueUpSaving(false)
+    setTrueUp(null)
+    load()
+  }
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
@@ -463,6 +543,44 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* True-up sheet — record what a fund actually holds right now */}
+      {trueUp && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
+          onClick={e => { if (e.target === e.currentTarget) setTrueUp(null) }}>
+          <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
+            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>True up fund</div>
+            <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{trueUp.name}</div>
+
+            <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
+              The app currently estimates <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{fmt(trueUp.fundBalance)}</b>
+              {trueUp.trued
+                ? ' from the balance you last recorded.'
+                : ` by accruing ${fmt(trueUp.monthlyBudget)}/mo since ${trueUp.anchorMonth}.`}
+              {' '}Enter what it really holds and future months accrue from there.
+            </div>
+
+            <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Actual balance today</label>
+            <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.85rem', marginBottom: '1rem' }}>
+              <span style={{ color: 'var(--accentL)', fontSize: '1.1rem', marginRight: '0.3rem' }}>$</span>
+              <input type="number" step="0.01" value={trueUpVal} autoFocus onChange={e => setTrueUpVal(e.target.value)} placeholder="0.00"
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '1.3rem', fontFamily: 'var(--font-mono)', padding: '0.55rem 0' }} />
+            </div>
+
+            <button onClick={saveTrueUp} disabled={trueUpSaving || trueUpVal === ''}
+              style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
+              {trueUpSaving ? 'Saving…' : 'Save balance'}
+            </button>
+
+            {trueUp.trued && (
+              <button onClick={clearTrueUp} disabled={trueUpSaving}
+                style={{ width: '100%', marginTop: '0.6rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
+                Clear and go back to estimating
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Funds Available — envelope balances */}
       <div style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -484,7 +602,7 @@ export default function Dashboard() {
             </div>
           )}
           {visibleFunds.map((f, i) => {
-            const pct = f.totalAllocated > 0 ? Math.min((f.ytdSpent / f.totalAllocated) * 100, 100) : 0
+            const pct = f.totalAllocated > 0 ? Math.min((f.spent / f.totalAllocated) * 100, 100) : 0
             const balColor = f.fundBalance <= 0 ? 'var(--red)' : f.fundBalance < f.monthlyBudget * 0.5 ? 'var(--amber)' : 'var(--green)'
             return (
               <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'rgba(200,160,80,0.04)' : 'transparent' }}>
@@ -498,8 +616,14 @@ export default function Dashboard() {
                   <button onClick={() => togglePin(f.id, f.isPinned)} style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', padding: 0, cursor: 'pointer', opacity: f.isPinned ? 1 : 0.35 }} title={f.isPinned ? 'Unpin' : 'Pin to top'}>
                     {f.isPinned ? '⭐' : '☆'}
                   </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}
+                    onClick={() => { if (!editFunds && !f.accruing) openTrueUp(f) }}
+                    role={!editFunds && !f.accruing ? 'button' : undefined}
+                    title={!editFunds && !f.accruing ? 'Set the real balance' : undefined}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds && !f.accruing ? 'pointer' : 'default' }}>
+                      {f.name}
+                      {f.trued && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
+                    </div>
                   </div>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: balColor }}>
                     {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
@@ -510,13 +634,18 @@ export default function Dashboard() {
                     <div style={{ width: `${pct}%`, height: '100%', background: balColor, borderRadius: '3px', transition: 'width 0.3s' }} />
                   </div>
                   <div style={{ fontSize: '0.55rem', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
-                    {fmt(f.ytdSpent)} spent / {fmt(f.totalAllocated)} alloc
+                    {fmt(f.spent)} spent / {fmt(f.totalAllocated)} alloc
                     {f.thisMonthSpent > 0 && <span style={{ color: 'var(--accentL)' }}> · {fmt(f.thisMonthSpent)} this mo</span>}
                   </div>
                 </div>
               </div>
             )
           })}
+          {visibleFunds.length > 0 && !editFunds && (
+            <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', padding: '0.45rem', borderTop: '1px solid var(--border)' }}>
+              Tap a fund name to set what it really holds
+            </div>
+          )}
           {funds.length > 12 && (
             <button onClick={() => setShowAll(!showAll)} style={{ width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--accent)', fontSize: '0.72rem', padding: '0.6rem', cursor: 'pointer' }}>
               {showAll ? 'Show less' : `Show all ${funds.length} items`}
