@@ -63,7 +63,8 @@ export default function Dashboard() {
     const selectedMonthNum = parseInt(format(viewMonth, 'M'))
 
     const [{ data: accs }, { data: txns, error: txnErr }, { data: items }] = await Promise.all([
-      supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
+      // accounts_with_balance derives `balance` from transaction history (012)
+      supabase.from('accounts_with_balance').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       // accounts must be embedded via account_id — transactions also has to_account_id
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts!account_id(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
       supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),

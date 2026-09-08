@@ -12,19 +12,26 @@ export default function Accounts() {
   const [form, setForm]         = useState({})
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
+  const [err, setErr]           = useState('')
 
   useEffect(() => { if (household) load() }, [household])
 
   useEffect(() => {
     if (!household) return
+    // Balances are derived from transactions now, so changes there move the
+    // numbers on this page just as much as changes to accounts do.
     const sub = supabase.channel('accounts-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounts', filter: `household_id=eq.${household.id}` }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `household_id=eq.${household.id}` }, () => load())
       .subscribe()
     return () => sub.unsubscribe()
   }, [household])
 
   async function load() {
-    const { data } = await supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order')
+    // accounts_with_balance derives `balance` from transaction history (012)
+    const { data, error } = await supabase.from('accounts_with_balance').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order')
+    if (error) setErr(`Couldn't load accounts: ${error.message}`)
+    else setErr('')
     setAccounts(data || [])
     setLoading(false)
   }
@@ -39,7 +46,7 @@ export default function Accounts() {
       icon: form.icon || '🏦',
       color: form.color || '#4a9a7a',
       target_balance: form.target ? +form.target : null,
-      balance: form.balance ? +form.balance : 0,
+      opening_balance: form.balance ? +form.balance : 0,
       sort_order: accounts.length + 1,
     })
     setSaving(false); setModal(null); setForm({})
@@ -54,7 +61,8 @@ export default function Accounts() {
     const fromAcc = accounts.find(a => a.id === form.from)
     const toAcc   = accounts.find(a => a.id === form.to)
 
-    await supabase.from('transactions').insert({
+    // The transfer row is the whole record — both balances derive from it (012)
+    const { error } = await supabase.from('transactions').insert({
       household_id: household.id,
       account_id: form.from,
       to_account_id: form.to,
@@ -64,8 +72,12 @@ export default function Accounts() {
       date: today, budget_month: month,
       created_by: user.id,
     })
-    await supabase.from('accounts').update({ balance: (fromAcc?.balance || 0) - amt }).eq('id', form.from)
-    await supabase.from('accounts').update({ balance: (toAcc?.balance || 0) + amt }).eq('id', form.to)
+
+    if (error) {
+      setErr(`Transfer failed: ${error.message}`)
+      setSaving(false)
+      return
+    }
 
     setSaving(false); setModal(null); setForm({}); load()
   }
@@ -76,6 +88,13 @@ export default function Accounts() {
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
+      {err && (
+        <div style={{ background: 'rgba(220,80,80,0.12)', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.6rem 0.75rem', marginBottom: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.85rem' }}>⚠️</span>
+          <div style={{ flex: 1, fontSize: '0.72rem', color: 'var(--text)', lineHeight: 1.45 }}>{err}</div>
+          <button onClick={() => setErr('')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '1rem' }}>
         <div>
           <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--accent)', textTransform: 'uppercase' }}>Accounts</div>

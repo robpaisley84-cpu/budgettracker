@@ -16,15 +16,16 @@ export default function Transactions() {
   const [loading, setLoading]           = useState(true)
   const [filter, setFilter]             = useState('all')
   const [err, setErr]                   = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => { if (household) load() }, [household])
 
   useEffect(() => {
     if (!household) return
+    // Reload rather than splicing in payload.new: edits and deletes have to be
+    // reflected too, and the raw payload has none of the embedded join data.
     const sub = supabase.channel('txn-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions', filter: `household_id=eq.${household.id}` }, payload => {
-        setTransactions(t => [payload.new, ...t])
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `household_id=eq.${household.id}` }, () => load())
       .subscribe()
     return () => sub.unsubscribe()
   }, [household])
@@ -47,23 +48,49 @@ export default function Transactions() {
     setLoading(false)
   }
 
+  // Open the modal on an existing row to correct it
+  function editTransaction(t) {
+    setForm({
+      id: t.id,
+      type: t.type,
+      amount: String(t.amount),
+      description: t.description || '',
+      date: t.date,
+      account_id: t.account_id || '',
+      budget_item_id: t.budget_item_id || '',
+    })
+    setConfirmDelete(false)
+    setShowLog(true)
+  }
+
+  function newTransaction() {
+    setForm({ type: 'expense', date: format(new Date(), 'yyyy-MM-dd') })
+    setConfirmDelete(false)
+    setShowLog(true)
+  }
+
+  // Account balances are derived from this history (migration 012), so saving
+  // and deleting only touch the transaction row — balances follow on their own.
   async function logTransaction() {
     if (!form.amount || !form.type) return
     setSaving(true)
-    const amt = +form.amount
-    const month = form.date?.slice(0, 7)
 
-    const { error } = await supabase.from('transactions').insert({
+    const row = {
       household_id: household.id,
       account_id: form.account_id || null,
-      budget_item_id: form.budget_item_id || null,
+      // only expenses belong to a budget line — don't leave a stale one behind
+      // if the type was switched during an edit
+      budget_item_id: form.type === 'expense' ? (form.budget_item_id || null) : null,
       type: form.type,
-      amount: amt,
+      amount: +form.amount,
       description: form.description || '',
       date: form.date,
-      budget_month: month,
-      created_by: user.id,
-    })
+      budget_month: form.date?.slice(0, 7),
+    }
+
+    const { error } = form.id
+      ? await supabase.from('transactions').update(row).eq('id', form.id)
+      : await supabase.from('transactions').insert({ ...row, created_by: user.id })
 
     // Keep the modal open on failure so the entry isn't lost
     if (error) {
@@ -72,21 +99,30 @@ export default function Transactions() {
       return
     }
 
-    // Update account balance for expenses
-    let balErr = null
-    if (form.account_id && form.type === 'expense') {
-      const acc = accounts.find(a => a.id === form.account_id)
-      if (acc) {
-        ;({ error: balErr } = await supabase.from('accounts').update({ balance: +acc.balance - amt }).eq('id', acc.id))
-      }
-    }
-
     setSaving(false)
+    closeModal()
+    load()
+  }
+
+  async function deleteTransaction() {
+    if (!form.id) return
+    setSaving(true)
+    const { error } = await supabase.from('transactions').delete().eq('id', form.id)
+    if (error) {
+      setErr(`Couldn't delete: ${error.message}`)
+      setSaving(false)
+      setConfirmDelete(false)
+      return
+    }
+    setSaving(false)
+    closeModal()
+    load()
+  }
+
+  function closeModal() {
     setShowLog(false)
+    setConfirmDelete(false)
     setForm({ type: 'expense', date: format(new Date(), 'yyyy-MM-dd') })
-    await load()
-    // after load(), which clears err on a clean reload
-    if (balErr) setErr(`Transaction saved, but the account balance didn't update: ${balErr.message}`)
   }
 
   const filtered = filter === 'all' ? transactions : transactions.filter(t => t.type === filter)
@@ -112,7 +148,7 @@ export default function Transactions() {
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg)', borderBottom: '1px solid var(--border)', padding: '0.85rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', color: 'var(--accentL)' }}>Transactions</div>
-          <button onClick={() => setShowLog(true)} style={{ background: 'var(--accent)', border: 'none', color: '#0d1a10', borderRadius: '7px', padding: '0.45rem 0.9rem', fontWeight: 700, fontSize: '0.82rem' }}>+ Log</button>
+          <button onClick={newTransaction} style={{ background: 'var(--accent)', border: 'none', color: '#0d1a10', borderRadius: '7px', padding: '0.45rem 0.9rem', fontWeight: 700, fontSize: '0.82rem' }}>+ Log</button>
         </div>
         <div style={{ display: 'flex', gap: '0.4rem' }}>
           {['all', 'expense', 'income', 'transfer'].map(f => (
@@ -135,6 +171,9 @@ export default function Transactions() {
         {filtered.length === 0 && !err && (
           <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1rem', fontSize: '0.85rem' }}>No transactions yet — tap + Log to add one</div>
         )}
+        {filtered.length > 0 && (
+          <div style={{ fontSize: '0.62rem', color: 'var(--muted)', padding: '0 0 0.5rem', textAlign: 'center' }}>Tap any entry to edit or delete it</div>
+        )}
         {groupByDate(filtered).map(([date, txns]) => (
           <div key={date} style={{ marginBottom: '0.75rem' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', padding: '0.35rem 0', marginBottom: '0.25rem' }}>
@@ -142,7 +181,9 @@ export default function Transactions() {
             </div>
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
               {txns.map((t, i) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', padding: '0.65rem 0.9rem', borderBottom: i < txns.length-1 ? '1px solid var(--border)' : 'none', gap: '0.6rem' }}>
+                <div key={t.id} onClick={() => editTransaction(t)} role="button" tabIndex={0}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); editTransaction(t) } }}
+                  style={{ display: 'flex', alignItems: 'center', padding: '0.65rem 0.9rem', borderBottom: i < txns.length-1 ? '1px solid var(--border)' : 'none', gap: '0.6rem', cursor: 'pointer' }}>
                   <span style={{ fontSize: '1rem' }}>{typeIcons[t.type]}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.82rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || t.budget_item?.name || '—'}</div>
@@ -164,9 +205,9 @@ export default function Transactions() {
       {/* Log modal */}
       {showLog && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
-          onClick={e => { if (e.target === e.currentTarget) setShowLog(false) }}>
+          onClick={e => { if (e.target === e.currentTarget) closeModal() }}>
           <div style={{ background: '#1a2a1c', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto', maxHeight: '85vh', overflowY: 'auto' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '1rem' }}>Log Transaction</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '1rem' }}>{form.id ? 'Edit Transaction' : 'Log Transaction'}</div>
 
             {/* Type selector */}
             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem' }}>
@@ -220,8 +261,34 @@ export default function Transactions() {
             ))}
 
             <button onClick={logTransaction} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: '#0d1a10', fontWeight: 700, fontSize: '0.9rem' }}>
-              {saving ? 'Saving…' : 'Log Transaction'}
+              {saving ? 'Saving…' : form.id ? 'Save Changes' : 'Log Transaction'}
             </button>
+
+            {/* Delete — only on an existing entry, behind a confirm step */}
+            {form.id && (
+              confirmDelete ? (
+                <div style={{ marginTop: '0.85rem', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.85rem', background: 'rgba(220,80,80,0.08)' }}>
+                  <div style={{ fontSize: '0.76rem', color: 'var(--text)', marginBottom: '0.7rem', lineHeight: 1.5 }}>
+                    Delete this entry? Account balances and budget totals will recalculate without it.
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button onClick={deleteTransaction} disabled={saving}
+                      style={{ flex: 1, background: 'var(--red)', border: 'none', borderRadius: '7px', padding: '0.6rem', color: '#fff', fontWeight: 700, fontSize: '0.82rem' }}>
+                      {saving ? 'Deleting…' : 'Yes, delete'}
+                    </button>
+                    <button onClick={() => setConfirmDelete(false)} disabled={saving}
+                      style={{ flex: 1, background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem', color: 'var(--muted)', fontSize: '0.82rem' }}>
+                      Keep it
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDelete(true)} disabled={saving}
+                  style={{ width: '100%', marginTop: '0.6rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem', color: 'var(--red)', fontSize: '0.82rem' }}>
+                  Delete entry
+                </button>
+              )
+            )}
           </div>
         </div>
       )}

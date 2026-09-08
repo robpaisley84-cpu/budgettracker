@@ -30,6 +30,10 @@ export default function Help() {
         Tap <b>Log</b> at the bottom → enter the amount, pick which <b>budget category</b> and <b>account</b> it came from, add a note, save. That's it — the Dashboard and Budget update right away.
       </Task>
 
+      <Task icon="🔧" title="Fix or remove something you logged">
+        On <b>Transactions</b>, tap the entry. The same form opens with everything filled in — change the amount, category, account, note or date and hit <b>Save Changes</b>, or tap <b>Delete entry</b> to remove it. Account balances and budget totals recalculate on their own, and every edit and deletion is recorded in <b>Activity</b>.
+      </Task>
+
       <Task icon="↔️" title="Move money between accounts">
         On <b>Log</b>, choose <b>Transfer</b>, pick the "from" and "to" accounts and the amount. Use this to shift money into a fund (like Disney or Emergency).
       </Task>

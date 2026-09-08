@@ -65,12 +65,11 @@ export default function Allocations() {
       created_by: user.id,
     })
 
-    // Process each allocation rule
+    // Process each allocation rule. The allocation transaction is the only
+    // record needed — account balances derive from these rows (012).
     for (const rule of rules) {
       const alloc = rule.is_percentage ? (amt * rule.amount / 100) : rule.amount
-      const acc   = accounts.find(a => a.id === rule.account_id)
 
-      // Create allocation transaction
       await supabase.from('transactions').insert({
         household_id: household.id,
         account_id: rule.account_id,
@@ -81,11 +80,6 @@ export default function Allocations() {
         budget_month: month,
         created_by: user.id,
       })
-
-      // Update account balance
-      if (acc) {
-        await supabase.from('accounts').update({ balance: +acc.balance + alloc }).eq('id', acc.id)
-      }
     }
 
     // Remaining goes to checking (first checking account)
@@ -103,7 +97,6 @@ export default function Allocations() {
           date: today, budget_month: month,
           created_by: user.id,
         })
-        await supabase.from('accounts').update({ balance: +checking.balance + remainder }).eq('id', checking.id)
       }
     }
 
