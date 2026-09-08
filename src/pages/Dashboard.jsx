@@ -35,6 +35,7 @@ export default function Dashboard() {
   const [funds, setFunds]             = useState([])
   const [summary, setSummary]         = useState({ budgeted: 0, spent: 0 })
   const [recent, setRecent]           = useState([])
+  const [recentErr, setRecentErr]     = useState('')
   const [ytd, setYtd]                 = useState({ budgeted: 0, spent: 0, months: 0 })
   const [monthlyBreakdown, setMonthlyBreakdown] = useState([])
   const [dueSoon, setDueSoon]         = useState([])
@@ -61,9 +62,10 @@ export default function Dashboard() {
     const janMonth = `${year}-01`
     const selectedMonthNum = parseInt(format(viewMonth, 'M'))
 
-    const [{ data: accs }, { data: txns }, { data: items }] = await Promise.all([
+    const [{ data: accs }, { data: txns, error: txnErr }, { data: items }] = await Promise.all([
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
-      supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
+      // accounts must be embedded via account_id — transactions also has to_account_id
+      supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts!account_id(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
       supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
     ])
 
@@ -184,6 +186,7 @@ export default function Dashboard() {
     setFunds(fundsList)
     setSummary({ budgeted, spent: monthSpent })
     setRecent(txns || [])
+    setRecentErr(txnErr ? `Couldn't load recent activity: ${txnErr.message}` : '')
     setYtd({ budgeted: ytdBudgeted, spent: ytdSpentTotal, months: selectedMonthNum })
     setMonthlyBreakdown(breakdown)
     setDueSoon(soon)
@@ -553,7 +556,10 @@ export default function Dashboard() {
           <Link to="/transactions" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>All →</Link>
         </div>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-          {recent.length === 0 && (
+          {recentErr && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--red)', padding: '1rem', lineHeight: 1.45 }}>⚠️ {recentErr}</div>
+          )}
+          {recent.length === 0 && !recentErr && (
             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
               No transactions this month — <Link to="/transactions" style={{ color: 'var(--accent)' }}>log one</Link>
             </div>

@@ -15,6 +15,7 @@ export default function Transactions() {
   const [saving, setSaving]             = useState(false)
   const [loading, setLoading]           = useState(true)
   const [filter, setFilter]             = useState('all')
+  const [err, setErr]                   = useState('')
 
   useEffect(() => { if (household) load() }, [household])
 
@@ -29,14 +30,20 @@ export default function Transactions() {
   }, [household])
 
   async function load() {
-    const [{ data: txns }, { data: accs }, { data: cats }] = await Promise.all([
-      supabase.from('transactions').select('*, budget_item:budget_items(name,category:budget_categories(name)), account:accounts(name)').eq('household_id', household.id).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(60),
+    // transactions has two FKs to accounts (account_id, to_account_id), so the
+    // accounts embed must name the one we want or PostgREST rejects the request.
+    const [txnRes, accRes, catRes] = await Promise.all([
+      supabase.from('transactions').select('*, budget_item:budget_items(name,category:budget_categories(name)), account:accounts!account_id(name)').eq('household_id', household.id).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(60),
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('budget_categories').select('*, items:budget_items(id,name)').eq('household_id', household.id).order('sort_order'),
     ])
-    setTransactions(txns || [])
-    setAccounts(accs || [])
-    setCategories(cats || [])
+
+    const failed = [txnRes, accRes, catRes].find(r => r.error)
+    setErr(failed ? `Couldn't load: ${failed.error.message}` : '')
+
+    setTransactions(txnRes.data || [])
+    setAccounts(accRes.data || [])
+    setCategories(catRes.data || [])
     setLoading(false)
   }
 
@@ -46,7 +53,7 @@ export default function Transactions() {
     const amt = +form.amount
     const month = form.date?.slice(0, 7)
 
-    await supabase.from('transactions').insert({
+    const { error } = await supabase.from('transactions').insert({
       household_id: household.id,
       account_id: form.account_id || null,
       budget_item_id: form.budget_item_id || null,
@@ -58,16 +65,28 @@ export default function Transactions() {
       created_by: user.id,
     })
 
+    // Keep the modal open on failure so the entry isn't lost
+    if (error) {
+      setErr(`Couldn't save: ${error.message}`)
+      setSaving(false)
+      return
+    }
+
     // Update account balance for expenses
+    let balErr = null
     if (form.account_id && form.type === 'expense') {
       const acc = accounts.find(a => a.id === form.account_id)
-      if (acc) await supabase.from('accounts').update({ balance: +acc.balance - amt }).eq('id', acc.id)
+      if (acc) {
+        ;({ error: balErr } = await supabase.from('accounts').update({ balance: +acc.balance - amt }).eq('id', acc.id))
+      }
     }
 
     setSaving(false)
     setShowLog(false)
     setForm({ type: 'expense', date: format(new Date(), 'yyyy-MM-dd') })
-    load()
+    await load()
+    // after load(), which clears err on a clean reload
+    if (balErr) setErr(`Transaction saved, but the account balance didn't update: ${balErr.message}`)
   }
 
   const filtered = filter === 'all' ? transactions : transactions.filter(t => t.type === filter)
@@ -102,9 +121,18 @@ export default function Transactions() {
         </div>
       </div>
 
+      {/* Error banner — never fail silently into an empty list */}
+      {err && (
+        <div style={{ margin: '0.6rem 0.85rem 0', background: 'rgba(220,80,80,0.12)', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.6rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.85rem' }}>⚠️</span>
+          <div style={{ flex: 1, fontSize: '0.72rem', color: 'var(--text)', lineHeight: 1.45 }}>{err}</div>
+          <button onClick={() => setErr('')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1, padding: 0 }}>×</button>
+        </div>
+      )}
+
       {/* Transaction list */}
       <div style={{ padding: '0.5rem 0.85rem' }}>
-        {filtered.length === 0 && (
+        {filtered.length === 0 && !err && (
           <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1rem', fontSize: '0.85rem' }}>No transactions yet — tap + Log to add one</div>
         )}
         {groupByDate(filtered).map(([date, txns]) => (
