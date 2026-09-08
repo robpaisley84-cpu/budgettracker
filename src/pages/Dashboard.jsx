@@ -48,6 +48,10 @@ export default function Dashboard() {
   const [trueUp, setTrueUp]           = useState(null)   // fund being trued up
   const [trueUpVal, setTrueUpVal]     = useState('')
   const [trueUpSaving, setTrueUpSaving] = useState(false)
+  const [moveMode, setMoveMode]       = useState(false)
+  const [moveTo, setMoveTo]           = useState('')
+  const [moveAmt, setMoveAmt]         = useState('')
+  const [moveNote, setMoveNote]       = useState('')
   const [viewMonth, setViewMonth]     = useState(new Date())
   const month = format(viewMonth, 'yyyy-MM')
   const isCurrentMonth = month === format(new Date(), 'yyyy-MM')
@@ -128,6 +132,22 @@ export default function Dashboard() {
       if (after) anchoredSpend[id] = (anchoredSpend[id] || 0) + +t.amount
     })
 
+    // Real dollars put into each line (013). Both sides of a move are rows in
+    // here, so a line that lent money is already reduced by it. Same anchor
+    // rule as spend: a stated balance supersedes anything allocated before it.
+    const { data: allocs } = await supabase
+      .from('paycheck_allocations')
+      .select('budget_item_id, amount, date')
+      .eq('household_id', household.id)
+
+    const allocatedTo = {}
+    allocs?.forEach(a => {
+      const id = a.budget_item_id
+      if (!id) return
+      if (savedAsOf[id] && a.date <= savedAsOf[id]) return
+      allocatedTo[id] = (allocatedTo[id] || 0) + +a.amount
+    })
+
     // Monthly actuals for this month only (for monthly summary)
     const monthActuals = {}
     monthTxns?.forEach(t => { monthActuals[t.budget_item_id] = (monthActuals[t.budget_item_id] || 0) + +t.amount })
@@ -140,32 +160,28 @@ export default function Dashboard() {
     const monthMap = {}
     ytdItemTxns?.forEach(t => { monthMap[t.budget_month] = (monthMap[t.budget_month] || 0) + +t.amount })
 
-    // Build envelope funds list
-    // Fund Balance = (Monthly Budget × Months Through Selected Month) - Total YTD Spent
-    // Accruing bills track their own cycle, so their balance comes from the
-    // accrual (which zeroes at each payment) rather than the calendar-year
-    // envelope — otherwise a rate change would retroactively rewrite history.
+    // Build envelope funds list.
+    //
+    //   balance = opening balance + allocated since the anchor - spent since it
+    //
+    // One rule for every line, accruing bills included: they are funded by
+    // allocation like anything else, and computeAccrual now only supplies the
+    // SUGGESTED set-aside and the due date, not the balance. Paying such a bill
+    // is an expense, which draws the envelope down naturally — no cycle reset.
     const asOf = endOfMonth(viewMonth)
 
     const fundsList = (items || []).map(item => {
       const calc = computeAccrual(item, asOf)
       const thisMonthSpent = monthActuals[item.id] || 0
-      const spent = calc ? (ytdActuals[item.id] || 0) : (anchoredSpend[item.id] || 0)
+      const spent = anchoredSpend[item.id] || 0
 
+      // The plan: what to put in each month. Accruing bills derive theirs.
       const monthlyBudget = calc ? calc.accrual : +item.budgeted_amount
 
-      // Months of funding since the anchor. A stated balance already covers its
-      // own month, so it counts 0 for that month; the start-of-budgeting default
-      // counts 1, because that month was funded too.
-      const anchorISO   = item.saved_as_of || `${itemAnchor[item.id] || month}-01`
-      const monthsFunded = Math.max(0,
-        differenceInCalendarMonths(viewMonth, parseISO(anchorISO)) + (item.saved_as_of ? 0 : 1))
-      const savedBase = item.saved_as_of ? (+item.saved_so_far || 0) : 0
-
-      const totalAllocated = calc ? calc.accrued : savedBase + monthlyBudget * monthsFunded
-      // Payments are already reflected by the cycle reset on an accruing bill,
-      // so subtracting spend here would double-count them.
-      const fundBalance    = calc ? calc.accrued : totalAllocated - spent
+      const savedBase      = item.saved_as_of ? (+item.saved_so_far || 0) : 0
+      const putIn          = allocatedTo[item.id] || 0
+      const totalAllocated = savedBase + putIn
+      const fundBalance    = totalAllocated - spent
 
       return {
         id: item.id,
@@ -175,7 +191,9 @@ export default function Dashboard() {
         spent,
         thisMonthSpent,
         fundBalance,
-        anchorMonth: calc ? null : (itemAnchor[item.id] || month),
+        anchorMonth: itemAnchor[item.id] || month,
+        putIn,
+        neverFunded: putIn === 0 && savedBase === 0,
         trued: !!item.saved_as_of,
         accruing: !!calc,
         accrualTarget: calc?.target ?? null,
@@ -321,6 +339,7 @@ export default function Dashboard() {
   function openTrueUp(f) {
     setTrueUp(f)
     setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
+    setMoveMode(false); setMoveTo(''); setMoveAmt(''); setMoveNote('')
   }
 
   // Records what a fund really holds today and anchors future accrual to it.
@@ -344,6 +363,32 @@ export default function Dashboard() {
       .eq('id', trueUp.id)
     setTrueUpSaving(false)
     setTrueUp(null)
+    load()
+  }
+
+  // Move allocated dollars from this fund to another. Written as two rows that
+  // sum to zero and share a transfer_group, so the source simply goes down (and
+  // can go negative if it lends more than it holds) and the pair is the record
+  // of where the money went.
+  async function moveMoney() {
+    if (!trueUp || !moveTo || !(+moveAmt > 0)) return
+    setTrueUpSaving(true)
+    const group = crypto.randomUUID()
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const dest  = funds.find(f => f.id === moveTo)
+    const base  = {
+      household_id: household.id,
+      transfer_group: group,
+      date: today,
+      budget_month: today.slice(0, 7),
+    }
+    const { error } = await supabase.from('paycheck_allocations').insert([
+      { ...base, budget_item_id: trueUp.id, amount: -Math.abs(+moveAmt), note: moveNote || `Moved to ${dest?.name || 'another fund'}` },
+      { ...base, budget_item_id: moveTo,    amount:  Math.abs(+moveAmt), note: moveNote || `Moved from ${trueUp.name}` },
+    ])
+    setTrueUpSaving(false)
+    if (error) { setRecentErr(`Couldn't move money: ${error.message}`); return }
+    setTrueUp(null); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setMoveMode(false)
     load()
   }
 
@@ -588,17 +633,67 @@ export default function Dashboard() {
         <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) setTrueUp(null) }}>
           <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>True up fund</div>
-            <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{trueUp.name}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>{moveMode ? 'Move money' : 'True up fund'}</div>
+            <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.5rem' }}>{trueUp.name}</div>
 
-            <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
-              The app currently estimates <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{fmt(trueUp.fundBalance)}</b>
-              {trueUp.trued
-                ? ' from the balance you last recorded.'
-                : ` by accruing ${fmt(trueUp.monthlyBudget)}/mo since ${trueUp.anchorMonth}.`}
-              {' '}Enter what it really holds and future months accrue from there.
+            <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '0.85rem' }}>
+              Holding <b style={{ fontFamily: 'var(--font-mono)', color: trueUp.fundBalance < 0 ? 'var(--red)' : 'var(--text)' }}>{trueUp.fundBalance < 0 ? '-' : ''}{fmt(trueUp.fundBalance)}</b>
+              {' '}— {fmt(trueUp.totalAllocated)} put in, {fmt(trueUp.spent)} spent.
+              {trueUp.fundBalance < 0 && ' This fund has lent out more than it holds.'}
             </div>
 
+            {/* Two actions on one sheet: state the real balance, or move dollars out */}
+            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem' }}>
+              {[{ k: false, l: 'Set balance' }, { k: true, l: 'Move money' }].map(o => (
+                <button key={String(o.k)} onClick={() => setMoveMode(o.k)}
+                  style={{ flex: 1, background: moveMode === o.k ? 'var(--accent)' : 'transparent', border: `1px solid ${moveMode === o.k ? 'var(--accent)' : 'var(--border)'}`, color: moveMode === o.k ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '6px', padding: '0.4rem', fontSize: '0.75rem', fontWeight: moveMode === o.k ? 700 : 400 }}>
+                  {o.l}
+                </button>
+              ))}
+            </div>
+
+            {moveMode ? (
+              <>
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Move to</label>
+                <select value={moveTo} onChange={e => setMoveTo(e.target.value)}
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.85rem' }}>
+                  <option value="">Choose a fund…</option>
+                  {funds.filter(f => f.id !== trueUp.id).map(f => (
+                    <option key={f.id} value={f.id}>{f.name} ({fmt(f.fundBalance)})</option>
+                  ))}
+                </select>
+
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Amount</label>
+                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.85rem', marginBottom: '0.85rem' }}>
+                  <span style={{ color: 'var(--accentL)', fontSize: '1.1rem', marginRight: '0.3rem' }}>$</span>
+                  <input type="number" step="0.01" value={moveAmt} autoFocus onChange={e => setMoveAmt(e.target.value)} placeholder="0.00"
+                    style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '1.3rem', fontFamily: 'var(--font-mono)', padding: '0.55rem 0' }} />
+                </div>
+
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Why (optional)</label>
+                <input value={moveNote} onChange={e => setMoveNote(e.target.value)} placeholder="e.g. trailer registration came in high"
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.85rem' }} />
+
+                {+moveAmt > 0 && moveTo && (
+                  <div style={{ fontSize: '0.66rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginBottom: '0.85rem', lineHeight: 1.6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{trueUp.name}</span>
+                      <span style={{ color: (trueUp.fundBalance - +moveAmt) < 0 ? 'var(--red)' : 'var(--text)' }}>{fmt(trueUp.fundBalance)} → {(trueUp.fundBalance - +moveAmt) < 0 ? '-' : ''}{fmt(trueUp.fundBalance - +moveAmt)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{funds.find(f => f.id === moveTo)?.name}</span>
+                      <span>{fmt(funds.find(f => f.id === moveTo)?.fundBalance || 0)} → {fmt((funds.find(f => f.id === moveTo)?.fundBalance || 0) + +moveAmt)}</span>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={moveMoney} disabled={trueUpSaving || !moveTo || !(+moveAmt > 0)}
+                  style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
+                  {trueUpSaving ? 'Moving…' : 'Move money'}
+                </button>
+              </>
+            ) : (
+            <>
             <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Actual balance today</label>
             <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.85rem', marginBottom: '1rem' }}>
               <span style={{ color: 'var(--accentL)', fontSize: '1.1rem', marginRight: '0.3rem' }}>$</span>
@@ -614,8 +709,10 @@ export default function Dashboard() {
             {trueUp.trued && (
               <button onClick={clearTrueUp} disabled={trueUpSaving}
                 style={{ width: '100%', marginTop: '0.6rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.65rem', color: 'var(--muted)', fontSize: '0.78rem' }}>
-                Clear and go back to estimating
+                Clear the opening balance
               </button>
+            )}
+            </>
             )}
           </div>
         </div>

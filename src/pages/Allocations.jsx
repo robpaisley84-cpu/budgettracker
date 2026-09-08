@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, addDays, nextDay, startOfDay } from 'date-fns'
+import { computeAccrual, isAutoAccrued } from '../lib/accrual'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -16,19 +17,94 @@ export default function Allocations() {
   const [paycheckAmt, setPaycheckAmt] = useState(household?.paycheck_amount || 4212)
   const [processing, setProcessing] = useState(false)
   const [loading, setLoading]     = useState(true)
+  const [items, setItems]         = useState([])
+  const [showDistribute, setShowDistribute] = useState(false)
+  const [distPaycheck, setDistPaycheck]     = useState(null)
+  const [distRows, setDistRows]   = useState([])
+  const [distSaving, setDistSaving] = useState(false)
+  const [distErr, setDistErr]     = useState('')
 
   useEffect(() => { if (household) load() }, [household])
 
   async function load() {
-    const [{ data: r }, { data: a }, { data: p }] = await Promise.all([
+    const [{ data: r }, { data: a }, { data: p }, { data: bi }] = await Promise.all([
       supabase.from('allocation_rules').select('*, account:accounts(name,icon,color)').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('paychecks').select('*').eq('household_id', household.id).order('date', { ascending: false }).limit(6),
+      // Budget lines, for distributing a paycheck across them
+      supabase.from('budget_items')
+        .select('id, name, budgeted_amount, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, category:budget_categories(name, icon, sort_order)')
+        .eq('household_id', household.id).eq('is_active', true),
     ])
     setRules(r || [])
     setAccounts(a || [])
     setPaychecks(p || [])
+    setItems(bi || [])
     setLoading(false)
+  }
+
+  // How much of one check a monthly plan implies. Approximate by design — it is
+  // a starting suggestion you then adjust, not a rule.
+  const CHECKS_PER_MONTH = { weekly: 4, biweekly: 2, semimonthly: 2, monthly: 1 }
+
+  function suggestedFor(item) {
+    const perMonth = isAutoAccrued(item)
+      ? (computeAccrual(item)?.accrual ?? +item.budgeted_amount)
+      : +item.budgeted_amount
+    const checks = CHECKS_PER_MONTH[household?.pay_frequency || 'biweekly'] || 2
+    return Math.round((perMonth / checks) * 100) / 100
+  }
+
+  // Open the distribute sheet for a paycheck, pre-filled with whatever is
+  // already allocated to it, falling back to the suggestion per line.
+  async function openDistribute(paycheck) {
+    setDistPaycheck(paycheck)
+    const { data: existing } = await supabase
+      .from('paycheck_allocations')
+      .select('budget_item_id, amount')
+      .eq('paycheck_id', paycheck.id)
+    const already = {}
+    existing?.forEach(e => { already[e.budget_item_id] = (already[e.budget_item_id] || 0) + +e.amount })
+    const rows = (items || [])
+      .map(i => ({
+        id: i.id,
+        name: i.name,
+        icon: i.category?.icon || '📋',
+        catSort: i.category?.sort_order ?? 99,
+        suggested: suggestedFor(i),
+        amount: String(already[i.id] ?? suggestedFor(i)),
+      }))
+      .sort((a, b) => a.catSort - b.catSort || a.name.localeCompare(b.name))
+    setDistRows(rows)
+    setShowDistribute(true)
+  }
+
+  // Replace this paycheck's distribution wholesale. Transfers between lines
+  // carry no paycheck_id, so they are untouched by this.
+  async function saveDistribution() {
+    if (!distPaycheck) return
+    setDistSaving(true)
+    await supabase.from('paycheck_allocations').delete().eq('paycheck_id', distPaycheck.id)
+    const rows = distRows
+      .filter(r => +r.amount > 0)
+      .map(r => ({
+        household_id: household.id,
+        paycheck_id: distPaycheck.id,
+        budget_item_id: r.id,
+        amount: +r.amount,
+        date: distPaycheck.date,
+        budget_month: String(distPaycheck.date).slice(0, 7),
+        created_by: user.id,
+        note: 'Paycheck allocation',
+      }))
+    if (rows.length) {
+      const { error } = await supabase.from('paycheck_allocations').insert(rows)
+      if (error) { setDistErr(`Couldn't save: ${error.message}`); setDistSaving(false); return }
+    }
+    setDistErr('')
+    setDistSaving(false)
+    setShowDistribute(false)
+    load()
   }
 
   async function addRule() {
@@ -130,6 +206,93 @@ export default function Allocations() {
               <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.2rem' }}>{x.l}</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, color: x.c }}>{x.v}</div>
             </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Distribute sheet */}
+      {showDistribute && distPaycheck && (() => {
+        const assigned = distRows.reduce((s, r) => s + (+r.amount || 0), 0)
+        const left = Math.round((+distPaycheck.net_amount - assigned) * 100) / 100
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
+            onClick={e => { if (e.target === e.currentTarget) setShowDistribute(false) }}>
+            <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--green)', borderRadius: '16px 16px 0 0', padding: '1.1rem 1.1rem 1.6rem', width: '100%', maxWidth: '600px', margin: '0 auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.35rem' }}>Distribute paycheck</div>
+              <div style={{ fontSize: '0.95rem', color: 'var(--text)', marginBottom: '0.6rem' }}>
+                {format(startOfDay(new Date(distPaycheck.date + 'T12:00')), 'EEE, MMM d')} · {fmt(distPaycheck.net_amount)}
+              </div>
+
+              {/* Running remainder — the number that tells you the check is balanced */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', background: 'var(--bg)', border: `1px solid ${left < 0 ? 'var(--red)' : left === 0 ? 'var(--green)' : 'var(--border)'}`, borderRadius: '8px', padding: '0.6rem 0.8rem', marginBottom: '0.75rem' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  {left < 0 ? 'Over-assigned' : 'Left to assign'}
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', color: left < 0 ? 'var(--red)' : left === 0 ? 'var(--green)' : 'var(--accentL)' }}>
+                  {left < 0 ? '-' : ''}{fmt(left)}
+                </span>
+              </div>
+
+              {distErr && <div style={{ fontSize: '0.7rem', color: 'var(--red)', marginBottom: '0.5rem' }}>⚠️ {distErr}</div>}
+
+              <div style={{ flex: 1, overflowY: 'auto', marginBottom: '0.75rem', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                {distRows.map((r, i) => (
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.7rem', borderBottom: i < distRows.length - 1 ? '1px solid var(--hairline)' : 'none' }}>
+                    <span style={{ fontSize: '0.85rem' }}>{r.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                      <button onClick={() => setDistRows(rows => rows.map(x => x.id === r.id ? { ...x, amount: String(x.suggested) } : x))}
+                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '0.58rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+                        suggested {fmt(r.suggested)}
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '6px', padding: '0 0.4rem' }}>
+                      <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>$</span>
+                      <input type="number" step="0.01" value={r.amount}
+                        onChange={e => setDistRows(rows => rows.map(x => x.id === r.id ? { ...x, amount: e.target.value } : x))}
+                        style={{ width: '4.6rem', background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', padding: '0.35rem 0', textAlign: 'right' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button onClick={() => setDistRows(rows => rows.map(r => ({ ...r, amount: String(r.suggested) })))}
+                  style={{ flex: 1, background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.7rem', color: 'var(--muted)', fontSize: '0.8rem' }}>
+                  Reset to plan
+                </button>
+                <button onClick={saveDistribution} disabled={distSaving}
+                  style={{ flex: 2, background: 'var(--green)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.85rem' }}>
+                  {distSaving ? 'Saving…' : 'Save distribution'}
+                </button>
+              </div>
+              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.5rem', lineHeight: 1.45 }}>
+                Replaces this paycheck's distribution. Money you've moved between funds isn't affected.
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Distribute a logged paycheck across the budget lines */}
+      <div style={{ marginBottom: '1rem' }}>
+        <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '0.5rem' }}>Distribute to Budget</h2>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+          {paychecks.length === 0 && (
+            <div style={{ fontSize: '0.78rem', color: 'var(--muted)', textAlign: 'center', padding: '1.25rem' }}>
+              No paychecks logged yet — process one above, then distribute it.
+            </div>
+          )}
+          {paychecks.slice(0, 3).map((p, i) => (
+            <button key={p.id} onClick={() => openDistribute(p)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'transparent', border: 'none', borderBottom: i < Math.min(paychecks.length, 3) - 1 ? '1px solid var(--border)' : 'none', padding: '0.7rem 0.9rem', textAlign: 'left' }}>
+              <span style={{ fontSize: '1rem' }}>📅</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{format(startOfDay(new Date(p.date + 'T12:00')), 'EEE, MMM d')}</div>
+                <div style={{ fontSize: '0.62rem', color: 'var(--muted)' }}>Tap to split across budget lines</div>
+              </div>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: 'var(--green)' }}>{fmt(p.net_amount)}</span>
+            </button>
           ))}
         </div>
       </div>

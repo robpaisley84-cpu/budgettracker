@@ -50,8 +50,16 @@ export default function Help() {
         On <b>Budget</b>, tap the dollar amount under any line and type a new number. Tap the line's <b>name</b> to rename it, or the coloured chip to change its tier. To add or remove a line, use <b>+ Add line item</b> or the little ✕ — removing asks you to confirm first.
       </Task>
 
+      <Task icon="📅" title="Split a paycheck across the budget">
+        On <b>Paycheck</b>, under <b>Distribute to Budget</b>, tap the check you want to split. Every line is pre-filled with a suggested amount — adjust any of them and watch <b>Left to assign</b> until the check is fully spoken for. <b>Save distribution</b> puts real dollars into each fund.
+      </Task>
+
+      <Task icon="↔️" title="Move money between funds when something runs over">
+        Tap the fund's name on the home screen, choose <b>Move money</b>, pick where it's going and how much, and note why. The fund you took it from drops by that amount — and can go below zero if it lent more than it held, which is how you see what it's owed. Every move is recorded in <b>Activity</b>.
+      </Task>
+
       <Task icon="🎯" title="Tell the app what a fund really holds">
-        The home screen estimates each fund by adding up your monthly budget since you started, minus what you've spent. If a fund actually holds a different amount, tap its <b>name</b> under Funds Available and enter the real figure — everything from then on counts up from there. Same on <b>Accounts</b>: tap a card to set its true balance.
+        A fund's balance is what you've put into it, minus what you've spent from it. If a fund already held money before you started tracking, tap its <b>name</b> under Funds Available and enter the real figure — that becomes its opening balance, and everything counts up from there. Same on <b>Accounts</b>: tap a card to set its true balance.
       </Task>
 
       {/* Home screen */}
