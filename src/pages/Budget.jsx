@@ -278,7 +278,10 @@ export default function Budget() {
                             ) : (
                               <span onClick={() => { setEditing(item.id); setEditVal(item.budgeted_amount) }} style={{ fontFamily: 'var(--font-mono)', cursor: 'pointer', borderBottom: '1px dashed var(--muted)' }}>{fmt(item.budgeted_amount)}</span>
                             )}
-                            {!isEditing && spent > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? '▲' : '▼'} {fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>}
+                            {/* Shown even at zero spend — "what's left" is most
+                                useful at the start of a month, before anything
+                                has been logged against the line. */}
+                            {!isEditing && +item.budgeted_amount > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? '▲' : '▼'} {fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>}
                           </div>
                         </div>
                         {spent > 0 && (

@@ -40,6 +40,7 @@ export default function Dashboard() {
   const [monthlyBreakdown, setMonthlyBreakdown] = useState([])
   const [dueSoon, setDueSoon]         = useState([])
   const [tierTotals, setTierTotals]   = useState({ essential: 0, lifestyle: 0, savings: 0 })
+  const [committed, setCommitted]     = useState(0)
   const [loading, setLoading]         = useState(true)
   const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
@@ -234,8 +235,24 @@ export default function Dashboard() {
       .sort((a, b) => a.daysUntil - b.daysUntil)
       .slice(0, 4)
 
+    // What this month is still committed to: fixed monthly bills that have not
+    // been paid yet, plus set-asides still owed on longer-cycle bills. Flexible
+    // lines (groceries, fuel) are deliberately NOT counted — that remaining
+    // budget is exactly the money "safe to spend" is meant to describe.
+    let committedTotal = 0
+    for (const it of items || []) {
+      const spentOnIt = monthActuals[it.id] || 0
+      const calc = computeAccrual(it, asOf)
+      if (calc) {
+        committedTotal += Math.max(0, calc.accrual - spentOnIt)          // set-aside still owed
+      } else if (+it.interval_months === 1) {
+        committedTotal += Math.max(0, +it.budgeted_amount - spentOnIt)   // unpaid fixed bill
+      }
+    }
+
     setAccounts(accs || [])
     setFunds(fundsList)
+    setCommitted(Math.round(committedTotal * 100) / 100)
     setSummary({ budgeted, spent: monthSpent })
     setRecent(txns || [])
     setRecentErr(txnErr ? `Couldn't load recent activity: ${txnErr.message}` : '')
@@ -250,6 +267,9 @@ export default function Dashboard() {
 
   const buffer = NET_MO - summary.spent
   const bufColor = buffer >= 1000 ? 'var(--green)' : buffer >= 0 ? 'var(--amber)' : 'var(--red)'
+
+  // Income minus what's gone AND what's still owed on bills this month.
+  const safeToSpend = Math.round((NET_MO - summary.spent - committed) * 100) / 100
 
   // Carry-over: does this month's income cover the full budget? Lean (2-check) months
   // need money carried in from a prior surplus; extra-check months build the reserve.
@@ -354,13 +374,33 @@ export default function Dashboard() {
           { l: `Monthly Income (${payCount}×)`, v: fmt(NET_MO), c: 'var(--green)' },
           { l: 'Spent This Month', v: fmt(summary.spent), c: 'var(--accentL)' },
           { l: 'Budget', v: fmt(summary.budgeted), c: 'var(--muted)' },
-          { l: 'Remaining', v: fmt(buffer), c: bufColor },
+          { l: 'Income Left', v: fmt(buffer), c: bufColor },
         ].map(x => (
           <div key={x.l} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem' }}>{x.l}</div>
             <div style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 500, color: x.c }}>{x.v}</div>
           </div>
         ))}
+      </div>
+
+      {/* Safe to spend — income left after everything still owed this month.
+          "Income Left" above is income minus spend only, which counts unpaid
+          bills as available; this is the number you can actually act on. */}
+      <div style={{ background: 'var(--card)', border: `1px solid ${safeToSpend < 0 ? 'var(--red)' : 'var(--accent)'}`, borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem', marginBottom: '0.5rem' }}>
+          <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Safe to Spend</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: safeToSpend < 0 ? 'var(--red)' : 'var(--accentL)' }}>
+            {safeToSpend < 0 ? '-' : ''}{fmt(safeToSpend)}
+          </div>
+        </div>
+        <div style={{ fontSize: '0.62rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Income this month</span><span>{fmt(NET_MO)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Spent so far</span><span>−{fmt(summary.spent)}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Bills &amp; set-asides still owed</span><span>−{fmt(committed)}</span></div>
+        </div>
+        <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginTop: '0.5rem', lineHeight: 1.45 }}>
+          Flexible lines like groceries aren't deducted — that's the money this figure is telling you about.
+        </div>
       </div>
 
       {/* Carry-over from previous month */}
