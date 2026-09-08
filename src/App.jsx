@@ -16,7 +16,7 @@ function RequireAuth({ children }) {
   const { user, household, loading } = useAuth()
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--accent)', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
-      Loading Road Budgetâ€¦
+      Loading Road Budget…
     </div>
   )
   if (!user) return <Navigate to="/auth" replace />
@@ -27,7 +27,7 @@ function AppShell() {
   const { user, loading } = useAuth()
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--accent)', fontFamily: 'Georgia, serif', fontSize: '1rem' }}>
-      Loading Road Budgetâ€¦
+      Loading Road Budget…
     </div>
   )
   if (!user) return <Routes><Route path="*" element={<Auth />} /></Routes>

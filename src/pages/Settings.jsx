@@ -34,7 +34,7 @@ export default function Settings() {
     const { error } = await supabase.auth.updateUser({ password: newPw })
     setPwSaving(false)
     if (error) setPwMsg({ ok: false, text: error.message })
-    else { setPwMsg({ ok: true, text: 'âœ“ Password updated' }); setNewPw(''); setTimeout(() => setPwMsg(null), 3000) }
+    else { setPwMsg({ ok: true, text: '✓ Password updated' }); setNewPw(''); setTimeout(() => setPwMsg(null), 3000) }
   }
 
   // Sync inputs when the household loads/changes (initial useState runs before data may be ready)
@@ -159,7 +159,7 @@ export default function Settings() {
 
         <button onClick={saveIncome} disabled={saving || !dirty}
           style={{ width: '100%', background: dirty ? 'var(--green)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.75rem', color: dirty ? 'var(--onAccent)' : 'var(--muted)', fontWeight: 700, fontSize: '0.88rem' }}>
-          {saving ? 'Savingâ€¦' : savedAt ? 'âœ“ Saved' : dirty ? 'Save Income' : 'Saved'}
+          {saving ? 'Saving…' : savedAt ? '✓ Saved' : dirty ? 'Save Income' : 'Saved'}
         </button>
       </div>
 
@@ -174,7 +174,7 @@ export default function Settings() {
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
         <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Change Your Password</div>
         {pwMsg && (
-          <div style={{ fontSize: '0.75rem', color: pwMsg.ok ? 'var(--green)' : 'var(--redL)', marginBottom: '0.6rem' }}>{pwMsg.text}</div>
+          <div style={{ fontSize: '0.75rem', color: pwMsg.ok ? 'var(--green)' : '#e07060', marginBottom: '0.6rem' }}>{pwMsg.text}</div>
         )}
         <input
           type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password"
@@ -182,13 +182,13 @@ export default function Settings() {
         />
         <button onClick={changePassword} disabled={pwSaving || !newPw}
           style={{ width: '100%', background: newPw ? 'var(--accent)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: newPw ? 'var(--onAccent)' : 'var(--muted)', fontWeight: 700, fontSize: '0.85rem' }}>
-          {pwSaving ? 'Updatingâ€¦' : 'Update Password'}
+          {pwSaving ? 'Updating…' : 'Update Password'}
         </button>
         <div style={{ fontSize: '0.66rem', color: 'var(--muted)', marginTop: '0.5rem' }}>Changes the password for the account you're signed in as ({member?.display_name || 'you'}).</div>
       </div>
 
       {/* Sign out */}
-      <button onClick={signOut} style={{ width: '100%', background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 'var(--radius)', padding: '0.75rem', fontSize: '0.88rem', marginTop: '0.5rem' }}>
+      <button onClick={signOut} style={{ width: '100%', background: 'transparent', border: '1px solid #c05a40', color: '#c05a40', borderRadius: 'var(--radius)', padding: '0.75rem', fontSize: '0.88rem', marginTop: '0.5rem' }}>
         Sign Out
       </button>
     </div>

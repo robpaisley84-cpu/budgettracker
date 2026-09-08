@@ -15,60 +15,60 @@ function describe(e) {
     const amt = money(n.amount ?? o.amount)
     const kind = n.type || o.type || 'expense'
     const label = kind === 'transfer' ? 'transfer' : kind === 'income' ? 'income' : kind === 'allocation' ? 'allocation' : 'transaction'
-    const suffix = d ? ` â€” ${d}` : ''
-    if (op === 'INSERT') return { icon: kind === 'transfer' ? 'ðŸ”„' : kind === 'income' ? 'ðŸ’µ' : 'ðŸ’¸', text: `added a ${amt} ${label}${suffix}` }
-    if (op === 'DELETE') return { icon: 'ðŸ—‘ï¸', text: `deleted a ${amt} ${label}${suffix}` }
-    return { icon: 'âœï¸', text: `edited a ${label}${suffix}` }
+    const suffix = d ? ` — ${d}` : ''
+    if (op === 'INSERT') return { icon: kind === 'transfer' ? '🔄' : kind === 'income' ? '💵' : '💸', text: `added a ${amt} ${label}${suffix}` }
+    if (op === 'DELETE') return { icon: '🗑️', text: `deleted a ${amt} ${label}${suffix}` }
+    return { icon: '✏️', text: `edited a ${label}${suffix}` }
   }
   if (t === 'budget_items') {
     const name = n.name || o.name || 'item'
-    if (op === 'INSERT') return { icon: 'âž•', text: `added budget line "${name}"` }
-    if (op === 'DELETE') return { icon: 'ðŸ—‘ï¸', text: `deleted budget line "${name}"` }
-    if (o.is_active !== false && n.is_active === false) return { icon: 'ðŸ—‘ï¸', text: `removed "${name}"` }
-    if (o.last_paid_date != n.last_paid_date && n.last_paid_date) return { icon: 'âœ…', text: `marked "${name}" paid ${n.last_paid_date} â€” fund reset, next cycle started` }
-    if (+o.bill_amount !== +n.bill_amount) return { icon: 'ðŸ§¾', text: `set "${name}" bill amount: ${money(o.bill_amount)} â†’ ${money(n.bill_amount)}` }
-    // The recalc writes budgeted_amount on its own â€” don't report it as a person's edit
+    if (op === 'INSERT') return { icon: '➕', text: `added budget line "${name}"` }
+    if (op === 'DELETE') return { icon: '🗑️', text: `deleted budget line "${name}"` }
+    if (o.is_active !== false && n.is_active === false) return { icon: '🗑️', text: `removed "${name}"` }
+    if (o.last_paid_date != n.last_paid_date && n.last_paid_date) return { icon: '✅', text: `marked "${name}" paid ${n.last_paid_date} — fund reset, next cycle started` }
+    if (+o.bill_amount !== +n.bill_amount) return { icon: '🧾', text: `set "${name}" bill amount: ${money(o.bill_amount)} → ${money(n.bill_amount)}` }
+    // The recalc writes budgeted_amount on its own — don't report it as a person's edit
     if (+o.budgeted_amount !== +n.budgeted_amount) {
       const autoCalc = n.auto_accrue && +n.interval_months > 1
       return autoCalc
-        ? { icon: 'ðŸ”„', text: `auto-accrual for "${name}" recalculated: ${money(o.budgeted_amount)} â†’ ${money(n.budgeted_amount)}/mo` }
-        : { icon: 'âœï¸', text: `changed "${name}" budget: ${money(o.budgeted_amount)} â†’ ${money(n.budgeted_amount)}` }
+        ? { icon: '🔄', text: `auto-accrual for "${name}" recalculated: ${money(o.budgeted_amount)} → ${money(n.budgeted_amount)}/mo` }
+        : { icon: '✏️', text: `changed "${name}" budget: ${money(o.budgeted_amount)} → ${money(n.budgeted_amount)}` }
     }
-    if (o.name !== n.name) return { icon: 'âœï¸', text: `renamed "${o.name}" â†’ "${n.name}"` }
-    if (o.interval_months != n.interval_months) return { icon: 'ðŸ—“ï¸', text: `set "${name}" to recur every ${n.interval_months} month${+n.interval_months === 1 ? '' : 's'}` }
-    if (o.due_day != n.due_day || o.next_due_date != n.next_due_date || o.bill_frequency != n.bill_frequency) return { icon: 'ðŸ—“ï¸', text: `updated due date for "${name}"` }
-    if (o.is_pinned != n.is_pinned) return { icon: 'ðŸ“Œ', text: `${n.is_pinned ? 'pinned' : 'unpinned'} "${name}"` }
-    return { icon: 'âœï¸', text: `updated "${name}"` }
+    if (o.name !== n.name) return { icon: '✏️', text: `renamed "${o.name}" → "${n.name}"` }
+    if (o.interval_months != n.interval_months) return { icon: '🗓️', text: `set "${name}" to recur every ${n.interval_months} month${+n.interval_months === 1 ? '' : 's'}` }
+    if (o.due_day != n.due_day || o.next_due_date != n.next_due_date || o.bill_frequency != n.bill_frequency) return { icon: '🗓️', text: `updated due date for "${name}"` }
+    if (o.is_pinned != n.is_pinned) return { icon: '📌', text: `${n.is_pinned ? 'pinned' : 'unpinned'} "${name}"` }
+    return { icon: '✏️', text: `updated "${name}"` }
   }
   if (t === 'accounts') {
     const name = n.name || o.name || 'account'
-    if (op === 'INSERT') return { icon: 'ðŸ¦', text: `added account "${name}"` }
-    if (op === 'DELETE') return { icon: 'ðŸ—‘ï¸', text: `deleted account "${name}"` }
-    if (+o.balance !== +n.balance) return { icon: 'ðŸ¦', text: `"${name}" balance: ${money(o.balance)} â†’ ${money(n.balance)}` }
-    return { icon: 'ðŸ¦', text: `updated account "${name}"` }
+    if (op === 'INSERT') return { icon: '🏦', text: `added account "${name}"` }
+    if (op === 'DELETE') return { icon: '🗑️', text: `deleted account "${name}"` }
+    if (+o.balance !== +n.balance) return { icon: '🏦', text: `"${name}" balance: ${money(o.balance)} → ${money(n.balance)}` }
+    return { icon: '🏦', text: `updated account "${name}"` }
   }
   if (t === 'paychecks') {
-    if (op === 'INSERT') return { icon: 'ðŸ“…', text: `processed a paycheck (+${money(n.net_amount)})` }
-    return { icon: 'ðŸ“…', text: `${op.toLowerCase()}d a paycheck` }
+    if (op === 'INSERT') return { icon: '📅', text: `processed a paycheck (+${money(n.net_amount)})` }
+    return { icon: '📅', text: `${op.toLowerCase()}d a paycheck` }
   }
   if (t === 'allocation_rules') {
     const name = n.name || o.name || 'rule'
-    if (op === 'INSERT') return { icon: 'ðŸ“…', text: `added allocation rule "${name}"` }
-    if (op === 'DELETE') return { icon: 'ðŸ—‘ï¸', text: `deleted allocation rule "${name}"` }
-    return { icon: 'ðŸ“…', text: `updated allocation rule "${name}"` }
+    if (op === 'INSERT') return { icon: '📅', text: `added allocation rule "${name}"` }
+    if (op === 'DELETE') return { icon: '🗑️', text: `deleted allocation rule "${name}"` }
+    return { icon: '📅', text: `updated allocation rule "${name}"` }
   }
   if (t === 'budget_categories') {
     const name = n.name || o.name || 'category'
-    if (op === 'INSERT') return { icon: 'ðŸ“‚', text: `added category "${name}"` }
-    if (op === 'DELETE') return { icon: 'ðŸ—‘ï¸', text: `deleted category "${name}"` }
-    if (o.name !== n.name) return { icon: 'âœï¸', text: `renamed category "${o.name}" â†’ "${n.name}"` }
-    return { icon: 'ðŸ“‚', text: `updated category "${name}"` }
+    if (op === 'INSERT') return { icon: '📂', text: `added category "${name}"` }
+    if (op === 'DELETE') return { icon: '🗑️', text: `deleted category "${name}"` }
+    if (o.name !== n.name) return { icon: '✏️', text: `renamed category "${o.name}" → "${n.name}"` }
+    return { icon: '📂', text: `updated category "${name}"` }
   }
   if (t === 'households') {
-    if (+o.paycheck_amount !== +n.paycheck_amount) return { icon: 'âš™ï¸', text: `changed take-home pay: ${money(o.paycheck_amount)} â†’ ${money(n.paycheck_amount)}` }
-    return { icon: 'âš™ï¸', text: `updated household settings` }
+    if (+o.paycheck_amount !== +n.paycheck_amount) return { icon: '⚙️', text: `changed take-home pay: ${money(o.paycheck_amount)} → ${money(n.paycheck_amount)}` }
+    return { icon: '⚙️', text: `updated household settings` }
   }
-  return { icon: 'â€¢', text: `${op.toLowerCase()} on ${t}` }
+  return { icon: '•', text: `${op.toLowerCase()} on ${t}` }
 }
 
 export default function Activity() {
@@ -101,12 +101,12 @@ export default function Activity() {
     ...Object.entries(names).map(([k, l]) => ({ k, l })),
   ]
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loadingâ€¦</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
       <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', marginBottom: '0.25rem' }}>Activity</div>
-      <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '1rem' }}>Every change to the budget, accounts, and transactions â€” who and when.</div>
+      <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '1rem' }}>Every change to the budget, accounts, and transactions — who and when.</div>
 
       {/* Person filter */}
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
@@ -118,7 +118,7 @@ export default function Activity() {
         ))}
       </div>
 
-      {filtered.length === 0 && <div style={{ fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center', padding: '2rem' }}>No activity yet â€” changes will show up here as you use the app.</div>}
+      {filtered.length === 0 && <div style={{ fontSize: '0.85rem', color: 'var(--muted)', textAlign: 'center', padding: '2rem' }}>No activity yet — changes will show up here as you use the app.</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
         {filtered.map(e => {

@@ -70,7 +70,7 @@ export default function Transactions() {
   }
 
   // Account balances are derived from this history (migration 012), so saving
-  // and deleting only touch the transaction row Ã¢â‚¬â€ balances follow on their own.
+  // and deleting only touch the transaction row — balances follow on their own.
   async function logTransaction() {
     if (!form.amount || !form.type) return
     setSaving(true)
@@ -78,7 +78,7 @@ export default function Transactions() {
     const row = {
       household_id: household.id,
       account_id: form.account_id || null,
-      // only expenses belong to a budget line Ã¢â‚¬â€ don't leave a stale one behind
+      // only expenses belong to a budget line — don't leave a stale one behind
       // if the type was switched during an edit
       budget_item_id: form.type === 'expense' ? (form.budget_item_id || null) : null,
       type: form.type,
@@ -138,9 +138,9 @@ export default function Transactions() {
   }
 
   const typeColors = { expense: 'var(--red)', income: 'var(--green)', transfer: 'var(--accent)', allocation: 'var(--muted)' }
-  const typeIcons  = { expense: 'Ã°Å¸â€™Â¸', income: 'Ã°Å¸â€™Âµ', transfer: 'Ã¢â€ â€Ã¯Â¸Â', allocation: 'Ã°Å¸â€œâ€¦' }
+  const typeIcons  = { expense: '💸', income: '💵', transfer: '↔️', allocation: '📅' }
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>LoadingÃ¢â‚¬Â¦</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
   return (
     <div className="page" style={{ paddingBottom: '5.5rem' }}>
@@ -157,19 +157,19 @@ export default function Transactions() {
         </div>
       </div>
 
-      {/* Error banner Ã¢â‚¬â€ never fail silently into an empty list */}
+      {/* Error banner — never fail silently into an empty list */}
       {err && (
         <div style={{ margin: '0.6rem 0.85rem 0', background: 'var(--dangerBg)', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.6rem 0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.85rem' }}>Ã¢Å¡Â Ã¯Â¸Â</span>
+          <span style={{ fontSize: '0.85rem' }}>⚠️</span>
           <div style={{ flex: 1, fontSize: '0.72rem', color: 'var(--text)', lineHeight: 1.45 }}>{err}</div>
-          <button onClick={() => setErr('')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1, padding: 0 }}>Ãƒâ€”</button>
+          <button onClick={() => setErr('')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1, padding: 0 }}>×</button>
         </div>
       )}
 
       {/* Transaction list */}
       <div style={{ padding: '0.5rem 0.85rem' }}>
         {filtered.length === 0 && !err && (
-          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1rem', fontSize: '0.85rem' }}>No transactions yet Ã¢â‚¬â€ tap + Log to add one</div>
+          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '3rem 1rem', fontSize: '0.85rem' }}>No transactions yet — tap + Log to add one</div>
         )}
         {filtered.length > 0 && (
           <div style={{ fontSize: '0.62rem', color: 'var(--muted)', padding: '0 0 0.5rem', textAlign: 'center' }}>Tap any entry to edit or delete it</div>
@@ -186,9 +186,9 @@ export default function Transactions() {
                   style={{ display: 'flex', alignItems: 'center', padding: '0.65rem 0.9rem', borderBottom: i < txns.length-1 ? '1px solid var(--border)' : 'none', gap: '0.6rem', cursor: 'pointer' }}>
                   <span style={{ fontSize: '1rem' }}>{typeIcons[t.type]}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || t.budget_item?.name || 'Ã¢â‚¬â€'}</div>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || t.budget_item?.name || '—'}</div>
                     <div style={{ fontSize: '0.62rem', color: 'var(--muted)' }}>
-                      {t.budget_item?.category?.name && <span>{t.budget_item.category.name} Ã‚Â· </span>}
+                      {t.budget_item?.category?.name && <span>{t.budget_item.category.name} · </span>}
                       {t.account?.name || t.type}
                     </div>
                   </div>
@@ -230,7 +230,7 @@ export default function Transactions() {
                 <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Budget Category</label>
                 <select value={form.budget_item_id || ''} onChange={e => setForm(f => ({ ...f, budget_item_id: e.target.value }))}
                   style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.85rem' }}>
-                  <option value="">Select line itemÃ¢â‚¬Â¦</option>
+                  <option value="">Select line item…</option>
                   {categories.map(cat => (
                     <optgroup key={cat.id} label={`${cat.icon} ${cat.name}`}>
                       {(cat.items || []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -261,10 +261,10 @@ export default function Transactions() {
             ))}
 
             <button onClick={logTransaction} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
-              {saving ? 'SavingÃ¢â‚¬Â¦' : form.id ? 'Save Changes' : 'Log Transaction'}
+              {saving ? 'Saving…' : form.id ? 'Save Changes' : 'Log Transaction'}
             </button>
 
-            {/* Delete Ã¢â‚¬â€ only on an existing entry, behind a confirm step */}
+            {/* Delete — only on an existing entry, behind a confirm step */}
             {form.id && (
               confirmDelete ? (
                 <div style={{ marginTop: '0.85rem', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.85rem', background: 'var(--dangerBg)' }}>
@@ -274,7 +274,7 @@ export default function Transactions() {
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button onClick={deleteTransaction} disabled={saving}
                       style={{ flex: 1, background: 'var(--red)', border: 'none', borderRadius: '7px', padding: '0.6rem', color: '#fff', fontWeight: 700, fontSize: '0.82rem' }}>
-                      {saving ? 'DeletingÃ¢â‚¬Â¦' : 'Yes, delete'}
+                      {saving ? 'Deleting…' : 'Yes, delete'}
                     </button>
                     <button onClick={() => setConfirmDelete(false)} disabled={saving}
                       style={{ flex: 1, background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem', color: 'var(--muted)', fontSize: '0.82rem' }}>

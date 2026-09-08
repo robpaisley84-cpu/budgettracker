@@ -172,30 +172,30 @@ export default function Bills() {
       }, today)
     : null
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>LoadingÃ¢â‚¬Â¦</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
       <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', marginBottom: '0.25rem' }}>Bills &amp; Reminders</div>
-      <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '1.1rem' }}>Tap any item to set its timing. Paydays Ã°Å¸â€™Âµ are shown so you can space bills after them.</div>
+      <div style={{ fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '1.1rem' }}>Tap any item to set its timing. Paydays 💵 are shown so you can space bills after them.</div>
 
       {/* This month timeline */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
-        <h2 style={{ ...h2, margin: 0 }}>{format(today, 'MMMM')} Ã¢â‚¬â€ monthly bills</h2>
+        <h2 style={{ ...h2, margin: 0 }}>{format(today, 'MMMM')} — monthly bills</h2>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--accentL)' }}>{fmt(monthlyTotal)}/mo</span>
       </div>
       <div style={section}>
-        {timeline.length === 0 && <div style={empty}>No monthly due dates set yet Ã¢â‚¬â€ tap a bill below to add one.</div>}
+        {timeline.length === 0 && <div style={empty}>No monthly due dates set yet — tap a bill below to add one.</div>}
         {timeline.map((row, idx) => row.pay ? (
           <div key={'p'+idx} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.9rem', background: 'rgba(74,154,90,0.08)', borderBottom: idx < timeline.length-1 ? '1px solid var(--hairline)' : 'none' }}>
             <span style={{ width: '2.1rem', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--green)' }}>{ord(row.day)}</span>
-            <span style={{ fontSize: '0.9rem' }}>Ã°Å¸â€™Âµ</span>
+            <span style={{ fontSize: '0.9rem' }}>💵</span>
             <span style={{ flex: 1, fontSize: '0.82rem', color: 'var(--green)', fontWeight: 600 }}>Payday</span>
           </div>
         ) : (
           <div key={row.bill.id} onClick={() => openEdit(row.bill)} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.55rem 0.9rem', cursor: 'pointer', borderBottom: idx < timeline.length-1 ? '1px solid var(--hairline)' : 'none' }}>
             <span style={{ width: '2.1rem', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--muted)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '5px', padding: '0.1rem 0' }}>{row.day}</span>
-            <span style={{ fontSize: '0.9rem' }}>{row.bill.category?.icon || 'Ã°Å¸â€œâ€ž'}</span>
+            <span style={{ fontSize: '0.9rem' }}>{row.bill.category?.icon || '📄'}</span>
             <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text)' }}>{row.bill.name}</span>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: 'var(--accentL)' }}>{fmt(row.bill.budgeted_amount)}</span>
           </div>
@@ -204,25 +204,25 @@ export default function Bills() {
 
       {/* Accruing bills */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
-        <h2 style={{ ...h2, margin: 0 }}>Accruing Ã¢â‚¬â€ set aside monthly</h2>
+        <h2 style={{ ...h2, margin: 0 }}>Accruing — set aside monthly</h2>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--accentL)' }}>{fmt(accrualTotal)}/mo</span>
       </div>
       <div style={section}>
-        {periodic.length === 0 && <div style={empty}>Nothing accruing yet Ã¢â‚¬â€ tap a bill below and set its amount, how often, and when you last paid it.</div>}
+        {periodic.length === 0 && <div style={empty}>Nothing accruing yet — tap a bill below and set its amount, how often, and when you last paid it.</div>}
         {periodic.map(({ item, calc }, idx) => {
           const pct  = Math.min(100, (calc.accrued / calc.target) * 100)
           const c    = calc.daysUntil < 0 ? 'var(--red)' : calc.daysUntil <= 30 ? 'var(--amber)' : 'var(--muted)'
           return (
             <div key={item.id} onClick={() => openEdit(item)} style={{ padding: '0.6rem 0.9rem', cursor: 'pointer', borderBottom: idx < periodic.length-1 ? '1px solid var(--hairline)' : 'none' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <span style={{ fontSize: '0.9rem' }}>{item.category?.icon || 'Ã°Å¸â€œâ€ž'}</span>
+                <span style={{ fontSize: '0.9rem' }}>{item.category?.icon || '📄'}</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '0.85rem', color: 'var(--text)' }}>
                     {item.name}{' '}
-                    <span style={{ fontSize: '0.62rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Ã‚Â· {intervalLabel(item.interval_months)}</span>
+                    <span style={{ fontSize: '0.62rem', color: 'var(--muted)', textTransform: 'uppercase' }}>· {intervalLabel(item.interval_months)}</span>
                   </div>
                   <div style={{ fontSize: '0.68rem', color: c }}>
-                    {fmt(calc.target)} due {format(calc.nextDue, 'MMM d, yyyy')} Ã‚Â· {calc.daysUntil === 0 ? 'today' : `in ${calc.daysUntil} days`}
+                    {fmt(calc.target)} due {format(calc.nextDue, 'MMM d, yyyy')} · {calc.daysUntil === 0 ? 'today' : `in ${calc.daysUntil} days`}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
@@ -250,9 +250,9 @@ export default function Bills() {
           <div style={{ ...section, marginBottom: 0 }}>
             {unscheduled.map((item, idx) => (
               <div key={item.id} onClick={() => openEdit(item)} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.9rem', cursor: 'pointer', borderBottom: idx < unscheduled.length-1 ? '1px solid var(--hairline)' : 'none' }}>
-                <span style={{ fontSize: '0.9rem' }}>{item.category?.icon || 'Ã°Å¸â€œâ€ž'}</span>
+                <span style={{ fontSize: '0.9rem' }}>{item.category?.icon || '📄'}</span>
                 <span style={{ flex: 1, fontSize: '0.84rem', color: 'var(--muted)' }}>{item.name}</span>
-                <span style={{ fontSize: '0.68rem', color: 'var(--accent)' }}>set up Ã¢â€ â€™</span>
+                <span style={{ fontSize: '0.68rem', color: 'var(--accent)' }}>set up →</span>
               </div>
             ))}
           </div>
@@ -296,7 +296,7 @@ export default function Bills() {
 
             {+form.interval === 1 && (
               <div style={{ marginBottom: '1rem' }}>
-                <label style={label}>Due day of month (1Ã¢â‚¬â€œ31)</label>
+                <label style={label}>Due day of month (1–31)</label>
                 <input type="number" min="1" max="31" value={form.dueDay} onChange={e => setForm(f => ({ ...f, dueDay: e.target.value }))} placeholder="e.g. 15" style={input} />
               </div>
             )}
@@ -322,7 +322,7 @@ export default function Bills() {
                   <label style={label}>Set aside so far</label>
                   <input type="number" step="0.01" value={form.saved} onChange={e => setForm(f => ({ ...f, saved: e.target.value }))} placeholder="0.00" style={input} />
                   <div style={{ fontSize: '0.63rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
-                    What you've actually banked for this bill. Lower it if you're behind Ã¢â‚¬â€ the catch-up prorates over the months left.
+                    What you've actually banked for this bill. Lower it if you're behind — the catch-up prorates over the months left.
                   </div>
                 </div>
 
@@ -330,11 +330,11 @@ export default function Bills() {
                   <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.7rem 0.8rem', marginBottom: '1rem' }}>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.05rem', color: 'var(--accentL)' }}>{fmt2(previewCalc.accrual)}<span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}> /month</span></div>
                     <div style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '0.2rem' }}>
-                      {fmt(previewCalc.accrued)} set aside of {fmt(previewCalc.target)} Ã‚Â· {previewCalc.monthsRemaining} month{previewCalc.monthsRemaining === 1 ? '' : 's'} to go
+                      {fmt(previewCalc.accrued)} set aside of {fmt(previewCalc.target)} · {previewCalc.monthsRemaining} month{previewCalc.monthsRemaining === 1 ? '' : 's'} to go
                     </div>
                     {previewCalc.needsCatchUp && (
                       <div style={{ fontSize: '0.65rem', color: 'var(--amber)', marginTop: '0.3rem' }}>
-                        Ã¢â€“Â² Catching up Ã¢â‚¬â€ {fmt2(previewCalc.perMonth)}/mo would be the steady rate on a full cycle.
+                        ▲ Catching up — {fmt2(previewCalc.perMonth)}/mo would be the steady rate on a full cycle.
                       </div>
                     )}
                   </div>
@@ -344,13 +344,13 @@ export default function Bills() {
 
                 <button onClick={() => save(true)} disabled={saving}
                   style={{ width: '100%', background: 'transparent', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0.6rem', color: 'var(--accent)', fontSize: '0.78rem', marginBottom: '0.5rem' }}>
-                  Ã¢Å“â€œ Mark paid today Ã¢â‚¬â€ reset the fund and start the next cycle
+                  ✓ Mark paid today — reset the fund and start the next cycle
                 </button>
               </>
             )}
 
             <button onClick={() => save(false)} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
-              {saving ? 'SavingÃ¢â‚¬Â¦' : 'Save'}
+              {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>

@@ -66,7 +66,7 @@ export default function Allocations() {
     })
 
     // Process each allocation rule. The allocation transaction is the only
-    // record needed Ã¢â‚¬â€ account balances derive from these rows (012).
+    // record needed — account balances derive from these rows (012).
     for (const rule of rules) {
       const alloc = rule.is_percentage ? (amt * rule.amount / 100) : rule.amount
 
@@ -93,7 +93,7 @@ export default function Allocations() {
           account_id: checking.id,
           type: 'allocation',
           amount: remainder,
-          description: 'Paycheck Ã¢â‚¬â€ remaining to checking',
+          description: 'Paycheck — remaining to checking',
           date: today, budget_month: month,
           created_by: user.id,
         })
@@ -106,7 +106,7 @@ export default function Allocations() {
   const totalAllocated = rules.reduce((s, r) => s + +r.amount, 0)
   const remainder = (household?.paycheck_amount || 4212) - totalAllocated
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>LoadingÃ¢â‚¬Â¦</div>
+  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
 
   return (
     <div className="page" style={{ padding: '1rem 0.85rem 5.5rem' }}>
@@ -115,7 +115,7 @@ export default function Allocations() {
           <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--accent)', textTransform: 'uppercase' }}>Bi-Weekly</div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)' }}>Paycheck</div>
         </div>
-        <button onClick={() => setShowPaycheck(true)} style={{ background: 'var(--green)', border: 'none', color: 'var(--onAccent)', borderRadius: '8px', padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.82rem' }}>Ã¢â€“Â¶ Process Paycheck</button>
+        <button onClick={() => setShowPaycheck(true)} style={{ background: 'var(--green)', border: 'none', color: 'var(--onAccent)', borderRadius: '8px', padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.82rem' }}>▶ Process Paycheck</button>
       </div>
 
       {/* Paycheck summary */}
@@ -141,16 +141,16 @@ export default function Allocations() {
       </div>
 
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: '1.25rem' }}>
-        {rules.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>No rules yet Ã¢â‚¬â€ add one to auto-allocate funds on each paycheck</div>}
+        {rules.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>No rules yet — add one to auto-allocate funds on each paycheck</div>}
         {rules.map((r, i) => (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '0.7rem 0.9rem', borderBottom: i < rules.length-1 ? '1px solid var(--border)' : 'none', gap: '0.6rem' }}>
-            <span>{r.account?.icon || 'Ã°Å¸ÂÂ¦'}</span>
+            <span>{r.account?.icon || '🏦'}</span>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{r.name}</div>
               <div style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>{r.account?.name}</div>
             </div>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: r.account?.color || 'var(--accentL)' }}>{fmt(r.amount)}</span>
-            <button onClick={() => deleteRule(r.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', padding: '0.2rem 0.4rem' }}>Ã¢Å“â€¢</button>
+            <button onClick={() => deleteRule(r.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.9rem', padding: '0.2rem 0.4rem' }}>✕</button>
           </div>
         ))}
       </div>
@@ -190,7 +190,7 @@ export default function Allocations() {
               <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Destination Account</label>
               <select value={form.account_id || ''} onChange={e => setForm(x => ({ ...x, account_id: e.target.value }))}
                 style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.9rem', outline: 'none' }}>
-                <option value="">Select accountÃ¢â‚¬Â¦</option>
+                <option value="">Select account…</option>
                 {accounts.map(a => <option key={a.id} value={a.id}>{a.icon} {a.name}</option>)}
               </select>
             </div>
@@ -223,12 +223,12 @@ export default function Allocations() {
                 )
               })}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', marginTop: '0.3rem', borderTop: '1px solid var(--border)', color: 'var(--muted)' }}>
-                <span>Ã°Å¸â€™Â³ Remainder Ã¢â€ â€™ Checking</span>
+                <span>💳 Remainder → Checking</span>
                 <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--green)' }}>{fmt(Math.max(0, +paycheckAmt - totalAllocated))}</span>
               </div>
             </div>
             <button onClick={processPaycheck} disabled={processing} style={{ width: '100%', background: 'var(--green)', border: 'none', borderRadius: '8px', padding: '0.85rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
-              {processing ? 'ProcessingÃ¢â‚¬Â¦' : 'Ã¢â€“Â¶ Confirm & Process'}
+              {processing ? 'Processing…' : '▶ Confirm & Process'}
             </button>
           </div>
         </div>

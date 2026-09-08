@@ -51,10 +51,10 @@ export default function Auth() {
             <label style={s.label}>Email</label>
             <input style={s.input} type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="you@email.com" />
             <label style={s.label}>Password</label>
-            <input style={s.input} type="password" value={password} onChange={e=>setPass(e.target.value)} required placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
+            <input style={s.input} type="password" value={password} onChange={e=>setPass(e.target.value)} required placeholder="••••••••" />
 
             <button style={s.btn} disabled={loading}>
-              {loading ? 'Just a momentâ€¦' : 'Sign In'}
+              {loading ? 'Just a moment…' : 'Sign In'}
             </button>
           </form>
 
