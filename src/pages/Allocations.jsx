@@ -182,9 +182,11 @@ export default function Allocations() {
     const month = today.slice(0, 7)
     const amt   = +paycheckAmt
 
+    // paychecks has only net_amount — the original code also sent gross_amount,
+    // which does not exist, and since it never checked the error this insert
+    // had silently failed on every paycheck since launch.
     const { data: pc, error: pcErr } = await supabase.from('paychecks').insert({
       household_id: household.id,
-      gross_amount: amt,
       net_amount: amt,
       date: today,
       created_by: user.id,
