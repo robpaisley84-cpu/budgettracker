@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
 
 const TABS = [
-  { to: '/',             icon: 'ðŸ“Š', label: 'Dashboard' },
-  { to: '/budget',       icon: 'ðŸ“‹', label: 'Budget'    },
-  { to: '/bills',        icon: 'ðŸ—“ï¸', label: 'Bills'     },
-  { to: '/accounts',     icon: 'ðŸ¦', label: 'Accounts'  },
-  { to: '/transactions', icon: 'ðŸ’¸', label: 'Log'       },
-  { to: '/allocations',  icon: 'ðŸ“…', label: 'Paycheck'  },
+  { to: '/',             icon: '📊', label: 'Dashboard' },
+  { to: '/budget',       icon: '📋', label: 'Budget'    },
+  { to: '/bills',        icon: '🗓️', label: 'Bills'     },
+  { to: '/accounts',     icon: '🏦', label: 'Accounts'  },
+  { to: '/transactions', icon: '💸', label: 'Log'       },
+  { to: '/allocations',  icon: '📅', label: 'Paycheck'  },
 ]
 
 export default function Nav() {
