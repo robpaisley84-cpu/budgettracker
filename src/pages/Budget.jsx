@@ -29,6 +29,7 @@ export default function Budget() {
   const [confirmCat, setConfirmCat]   = useState(null)
   const [renamingCat, setRenamingCat] = useState(null)
   const [catNameVal, setCatNameVal]   = useState('')
+  const [accounts, setAccounts]       = useState([])
   const [showAddItem, setShowAddItem] = useState(null)
   const [showAddCat, setShowAddCat]   = useState(false)
   const [form, setForm]               = useState({})
@@ -51,12 +52,18 @@ export default function Budget() {
 
   async function load() {
     setLoading(true)
-    const { data: cats } = await supabase
-      .from('budget_categories')
-      .select('*, items:budget_items(*)')
-      .eq('household_id', household.id)
-      .order('sort_order')
+    const [{ data: cats }, { data: accs }] = await Promise.all([
+      supabase
+        .from('budget_categories')
+        .select('*, items:budget_items(*)')
+        .eq('household_id', household.id)
+        .order('sort_order'),
+      // Every line lives in an account (014): checking for a virtual envelope,
+      // its own savings account for a fund
+      supabase.from('accounts').select('id, name, icon, type').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
+    ])
     setCategories(cats || [])
+    setAccounts(accs || [])
     if (cats?.length) setExpanded(Object.fromEntries(cats.map(c => [c.id, true])))
     await loadActuals()
     setLoading(false)
@@ -138,6 +145,25 @@ export default function Budget() {
     setSaving(false)
     setShowAddCat(false)
     setForm({})
+    load()
+  }
+
+  // Which account a line lives in. Checking makes it a virtual envelope; any
+  // other account makes the line that account, and funding it moves money there.
+  async function setBacking(itemId, accountId) {
+    await supabase.from('budget_items').update({ account_id: accountId || null }).eq('id', itemId)
+    load()
+  }
+
+  // Exactly one line receives each paycheck's leftover (enforced by a unique
+  // index), so clear the old one before setting the new.
+  async function setRemainderTarget(itemId, on) {
+    if (on) {
+      await supabase.from('budget_items').update({ is_remainder_target: false }).eq('household_id', household.id).eq('is_remainder_target', true)
+      await supabase.from('budget_items').update({ is_remainder_target: true }).eq('id', itemId)
+    } else {
+      await supabase.from('budget_items').update({ is_remainder_target: false }).eq('id', itemId)
+    }
     load()
   }
 
@@ -305,6 +331,17 @@ export default function Budget() {
                                 has been logged against the line. */}
                             {!isEditing && +item.budgeted_amount > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? '▲' : '▼'} {fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>}
                           </div>
+                          {/* Where this envelope lives. Checking = virtual; anything else = the line is that account. */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.15rem' }}>
+                            <span style={{ fontSize: '0.58rem', color: 'var(--muted)' }}>in</span>
+                            <select value={item.account_id || ''} onChange={e => setBacking(item.id, e.target.value)}
+                              title="The account this line's money lives in"
+                              style={{ background: 'transparent', border: 'none', borderBottom: '1px dashed var(--border)', color: 'var(--muted)', fontSize: '0.6rem', padding: '0 0.1rem', outline: 'none', cursor: 'pointer', maxWidth: '11rem' }}>
+                              <option value="">— no account —</option>
+                              {accounts.map(a => <option key={a.id} value={a.id}>{a.icon} {a.name}{a.type === 'checking' ? ' (virtual)' : ' (moves money)'}</option>)}
+                            </select>
+                            {item.is_remainder_target && <span style={{ fontSize: '0.58rem', color: 'var(--accent)' }} title="Receives each paycheck's leftover">⤵ leftover</span>}
+                          </div>
                         </div>
                         {spent > 0 && (
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: isOver ? 'var(--red)' : 'var(--accentL)' }}>{fmt(spent)}</span>
@@ -323,6 +360,9 @@ export default function Budget() {
                               style={{ background: 'transparent', border: `1px solid ${TIERS[item.tier || 'essential'].color}`, color: TIERS[item.tier || 'essential'].color, borderRadius: '4px', fontSize: '0.55rem', fontWeight: 700, padding: '0.05rem 0.32rem', fontFamily: 'var(--font-mono)' }}>
                               {TIERS[item.tier || 'essential'].short}
                             </button>
+                            <button onClick={() => setRemainderTarget(item.id, !item.is_remainder_target)}
+                              title={item.is_remainder_target ? 'Stop sending the paycheck leftover here' : 'Send each paycheck\'s leftover to this line'}
+                              style={{ background: item.is_remainder_target ? 'var(--accent)' : 'transparent', border: `1px solid ${item.is_remainder_target ? 'var(--accent)' : 'var(--border)'}`, color: item.is_remainder_target ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '4px', fontSize: '0.6rem', padding: '0.05rem 0.3rem', opacity: item.is_remainder_target ? 1 : 0.6 }}>⤵</button>
                             <button onClick={() => setConfirmDel(item.id)} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.65rem', padding: '0.1rem 0.3rem', opacity: 0.4 }} title="Remove item">✕</button>
                           </>
                         )}

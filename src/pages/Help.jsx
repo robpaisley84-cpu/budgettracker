@@ -39,7 +39,11 @@ export default function Help() {
       </Task>
 
       <Task icon="📅" title="On payday">
-        Go to <b>Paycheck</b> → <b>Process Paycheck</b> → confirm the net amount. It splits the check into your funds automatically and drops the rest into checking. Do this each time a paycheck lands.
+        Go to <b>Paycheck</b> → <b>Process Paycheck</b> → confirm the net amount. The check is deposited into checking, then the split opens with every line filled at its plan and whatever's left already in your <b>Exit Fund</b>. Glance over it, change anything, <b>Save distribution</b>. Lines that live in their own savings account (Lincoln's, Disney, Emergency) actually move that money there.
+      </Task>
+
+      <Task icon="🏦" title="Which account a budget line lives in">
+        Every line on <b>Budget</b> shows <b>in ▾</b> under it. Most lines live in <b>Checking</b> — that's a virtual envelope, nothing moves at the bank. Set a fund line to its own savings account and the line <i>becomes</i> that account: one number, and funding it transfers real money. The <b>⤵</b> button marks the one line that soaks up each paycheck's leftover.
       </Task>
 
       <Task icon="🗓️" title="When you pay an annual bill (insurance, registration)">
@@ -50,8 +54,8 @@ export default function Help() {
         On <b>Budget</b>, tap the dollar amount under any line and type a new number. Tap the line's <b>name</b> to rename it, or the coloured chip to change its tier. To add or remove a line, use <b>+ Add line item</b> or the little ✕ — removing asks you to confirm first.
       </Task>
 
-      <Task icon="📅" title="Split a paycheck across the budget">
-        On <b>Paycheck</b>, under <b>Distribute to Budget</b>, tap the check you want to split. Every line is pre-filled with a suggested amount — adjust any of them and watch <b>Left to assign</b> until the check is fully spoken for. <b>Save distribution</b> puts real dollars into each fund.
+      <Task icon="🔁" title="Re-split a paycheck you already processed">
+        On <b>Paycheck</b>, under <b>Distribute to Budget</b>, tap the check. Change any line and the leftover line adjusts itself so the check stays exactly spoken for. Saving replaces that check's split — and its transfers — without touching money you've moved between funds since.
       </Task>
 
       <Task icon="↔️" title="Move money between funds when something runs over">

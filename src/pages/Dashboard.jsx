@@ -75,7 +75,7 @@ export default function Dashboard() {
       supabase.from('accounts_with_balance').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       // accounts must be embedded via account_id — transactions also has to_account_id
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts!account_id(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
-      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
+      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, account_id, is_remainder_target, account:accounts(id, name, icon, type), category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
       // Oldest transaction = when this household started budgeting. Envelope
       // funds accrue from here, not from January, so a mid-year start does not
       // claim months of funding that never happened.
@@ -170,6 +170,10 @@ export default function Dashboard() {
     // is an expense, which draws the envelope down naturally — no cycle reset.
     const asOf = endOfMonth(viewMonth)
 
+    // Derived balances by account, for lines that live in their own account
+    const accountBalance = {}
+    ;(accs || []).forEach(a => { accountBalance[a.id] = +a.balance })
+
     const fundsList = (items || []).map(item => {
       const calc = computeAccrual(item, asOf)
       const thisMonthSpent = monthActuals[item.id] || 0
@@ -181,9 +185,22 @@ export default function Dashboard() {
       const savedBase      = item.saved_as_of ? (+item.saved_so_far || 0) : 0
       const putIn          = allocatedTo[item.id] || 0
       const totalAllocated = savedBase + putIn
-      const fundBalance    = totalAllocated - spent
+
+      // A line that lives in its own account IS that account (014): its balance
+      // is the account's derived balance, so envelope and bank can never
+      // disagree. Lines backed by checking are virtual earmarks and use the
+      // envelope arithmetic.
+      const backing    = item.account || null
+      const ownAccount = !!(backing && backing.type !== 'checking')
+      const fundBalance = ownAccount
+        ? +(accountBalance[backing.id] ?? 0)
+        : totalAllocated - spent
 
       return {
+        backedBy: backing?.name || null,
+        backingAccountId: backing?.id || null,
+        ownAccount,
+        isRemainderTarget: !!item.is_remainder_target,
         id: item.id,
         name: item.name,
         monthlyBudget,
@@ -339,7 +356,9 @@ export default function Dashboard() {
   function openTrueUp(f) {
     setTrueUp(f)
     setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
-    setMoveMode(false); setMoveTo(''); setMoveAmt(''); setMoveNote('')
+    // A line that is its own account has no envelope to true up — its balance
+    // is set on the Accounts page — so open straight onto Move money.
+    setMoveMode(!!f.ownAccount); setMoveTo(''); setMoveAmt(''); setMoveNote('')
   }
 
   // Records what a fund really holds today and anchors future accrual to it.
@@ -382,12 +401,28 @@ export default function Dashboard() {
       date: today,
       budget_month: today.slice(0, 7),
     }
+    const amt = Math.abs(+moveAmt)
     const { error } = await supabase.from('paycheck_allocations').insert([
-      { ...base, budget_item_id: trueUp.id, amount: -Math.abs(+moveAmt), note: moveNote || `Moved to ${dest?.name || 'another fund'}` },
-      { ...base, budget_item_id: moveTo,    amount:  Math.abs(+moveAmt), note: moveNote || `Moved from ${trueUp.name}` },
+      { ...base, budget_item_id: trueUp.id, amount: -amt, note: moveNote || `Moved to ${dest?.name || 'another fund'}` },
+      { ...base, budget_item_id: moveTo,    amount:  amt, note: moveNote || `Moved from ${trueUp.name}` },
     ])
+    if (error) { setTrueUpSaving(false); setRecentErr(`Couldn't move money: ${error.message}`); return }
+
+    // If the two lines live in different accounts, the money has to move at
+    // the bank too — record the real transfer so both account balances follow.
+    if (trueUp.backingAccountId && dest?.backingAccountId && trueUp.backingAccountId !== dest.backingAccountId) {
+      const { error: tErr } = await supabase.from('transactions').insert({
+        household_id: household.id,
+        account_id: trueUp.backingAccountId,
+        to_account_id: dest.backingAccountId,
+        type: 'transfer',
+        amount: amt,
+        description: moveNote || `Moved: ${trueUp.name} → ${dest.name}`,
+        date: today, budget_month: today.slice(0, 7),
+      })
+      if (tErr) { setTrueUpSaving(false); setRecentErr(`Envelopes moved, but the account transfer didn't save: ${tErr.message}`); return }
+    }
     setTrueUpSaving(false)
-    if (error) { setRecentErr(`Couldn't move money: ${error.message}`); return }
     setTrueUp(null); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setMoveMode(false)
     load()
   }
@@ -638,13 +673,16 @@ export default function Dashboard() {
 
             <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '0.85rem' }}>
               Holding <b style={{ fontFamily: 'var(--font-mono)', color: trueUp.fundBalance < 0 ? 'var(--red)' : 'var(--text)' }}>{trueUp.fundBalance < 0 ? '-' : ''}{fmt(trueUp.fundBalance)}</b>
-              {' '}— {fmt(trueUp.totalAllocated)} put in, {fmt(trueUp.spent)} spent.
-              {trueUp.fundBalance < 0 && ' This fund has lent out more than it holds.'}
+              {trueUp.ownAccount
+                ? <> — the balance of <b style={{ color: 'var(--text)' }}>{trueUp.backedBy}</b>. To correct it, tap that account on the Accounts page.</>
+                : <> — {fmt(trueUp.totalAllocated)} put in, {fmt(trueUp.spent)} spent.</>}
+              {!trueUp.ownAccount && trueUp.fundBalance < 0 && ' This fund has lent out more than it holds.'}
             </div>
 
-            {/* Two actions on one sheet: state the real balance, or move dollars out */}
+            {/* Two actions on one sheet: state the real balance, or move dollars
+                out. A line that is its own account only gets the second. */}
             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem' }}>
-              {[{ k: false, l: 'Set balance' }, { k: true, l: 'Move money' }].map(o => (
+              {[{ k: false, l: 'Set balance' }, { k: true, l: 'Move money' }].filter(o => !(trueUp.ownAccount && o.k === false)).map(o => (
                 <button key={String(o.k)} onClick={() => setMoveMode(o.k)}
                   style={{ flex: 1, background: moveMode === o.k ? 'var(--accent)' : 'transparent', border: `1px solid ${moveMode === o.k ? 'var(--accent)' : 'var(--border)'}`, color: moveMode === o.k ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '6px', padding: '0.4rem', fontSize: '0.75rem', fontWeight: moveMode === o.k ? 700 : 400 }}>
                   {o.l}
@@ -754,13 +792,19 @@ export default function Dashboard() {
                     {f.isPinned ? '⭐' : '☆'}
                   </button>
                   <div style={{ flex: 1, minWidth: 0 }}
-                    onClick={() => { if (!editFunds && !f.accruing) openTrueUp(f) }}
-                    role={!editFunds && !f.accruing ? 'button' : undefined}
-                    title={!editFunds && !f.accruing ? 'Set the real balance' : undefined}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds && !f.accruing ? 'pointer' : 'default' }}>
+                    onClick={() => { if (!editFunds) openTrueUp(f) }}
+                    role={!editFunds ? 'button' : undefined}
+                    title={!editFunds ? (f.ownAccount ? 'Move money' : 'Set the real balance or move money') : undefined}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds ? 'pointer' : 'default' }}>
                       {f.name}
-                      {f.trued && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
+                      {f.trued && !f.ownAccount && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
+                      {f.isRemainderTarget && <span style={{ color: 'var(--accent)', fontSize: '0.58rem' }} title="Receives each paycheck's leftover"> ⤵</span>}
                     </div>
+                    {f.ownAccount && (
+                      <div style={{ fontSize: '0.56rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        🏦 {f.backedBy} — this is the account balance
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: balColor }}>
                     {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
