@@ -77,7 +77,7 @@ export default function Settings() {
       {/* Colour scheme — per device, so you and Hayley can differ */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', marginBottom: '0.75rem' }}>
         <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>Colour Scheme</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem' }}>
           {THEMES.map(t => {
             const on = theme === t.k
             return (
@@ -88,8 +88,8 @@ export default function Settings() {
                   color: on ? 'var(--onAccent)' : 'var(--muted)',
                   borderRadius: '7px', padding: '0.55rem 0.5rem', textAlign: 'left',
                 }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: on ? 700 : 400 }}>{t.label}</div>
-                <div style={{ fontSize: '0.6rem', opacity: 0.85, marginTop: '0.1rem' }}>{t.hint}</div>
+                <div style={{ fontSize: '0.74rem', fontWeight: on ? 700 : 400 }}>{t.label}</div>
+                <div style={{ fontSize: '0.55rem', opacity: 0.85, marginTop: '0.1rem', lineHeight: 1.3 }}>{t.hint}</div>
               </button>
             )
           })}

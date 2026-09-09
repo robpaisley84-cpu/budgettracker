@@ -1,13 +1,21 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ── Themes ────────────────────────────────────────────────────────────────
-   Two palettes drawn from the rig:
+   Three palettes drawn from the rig:
 
-   "Avalanche" (dark, default) — the truck's Avalanche grey: charcoal greys,
-   linen text, warm oak accent.
-   "Coastal Linen" (light) — the camper's interior decor package: linen and
-   off-white grounds, charcoal text, glazed-hardwood accent, Avalanche grey
-   as the structural mid-tone.
+   "Avalanche" (default) — the truck's paint. Ford Avalanche (code DR) is a
+   non-metallic, muted LIGHT grey with warm undertones and a faint olive cast,
+   in a flat low-sheen finish; the paint itself sits around #9b9b8e. The ground
+   is that colour lifted a couple of steps so text stays readable, with the
+   paint value carried in the borders and secondary text. Warm oak accent,
+   which ties it to the camper.
+
+   "Coastal Linen" — the camper's interior decor package: linen and off-white
+   grounds, charcoal text, glazed-hardwood accent.
+
+   "Night" — a dark charcoal option for evenings. Deliberately NOT called
+   Avalanche: the paint is a light colour and a near-black theme has no
+   business claiming its name.
 
    Every colour used in the app comes from here. --onAccent is the text that
    sits ON an accent or green button, and it has to flip with the theme, which
@@ -15,6 +23,67 @@
    ──────────────────────────────────────────────────────────────────────── */
 
 :root {
+  --bg:        #dddcd3;
+  --bgAlt:     #cfcec4;
+  --card:      #ecebe4;
+  --sheet:     #f6f5f0;
+  --nav:       #ecebe4;
+  --border:    #aeada0;
+  --text:      #24262a;
+  /* Tuned for contrast, not picked by eye: muted carries small uppercase
+     labels and needs 4.5:1 on the ground, and --accent has to stay legible
+     both as text on a card and behind --onAccent on a button. */
+  --muted:     #5c5e55;
+  --accent:    #7f5f3a;
+  /* On a light ground the "lighter accent" has to go DARKER to stay legible —
+     it is used as a foreground colour for headings and figures. */
+  --accentL:   #6b5133;
+  --onAccent:  #f6f5f0;
+  --green:     #3c7551;
+  --red:       #a4432e;
+  --redL:      #8a3323;
+  --dangerBg:  #f0ded8;
+  --amber:     #8d6214;
+  /* Budget tiers — used as text, so they need a per-theme value */
+  --tierE:     #3a7449;
+  --tierL:     #82601e;
+  --tierS:     #653c8c;
+  /* Barely-there divider inside a card, and the modal scrim */
+  --hairline:  rgba(0,0,0,0.08);
+  --scrim:     rgba(0,0,0,0.45);
+  --pinned:    rgba(140,107,69,0.08);
+  --radius:    10px;
+  --font-display: 'Playfair Display', serif;
+  --font-body:    'Lato', sans-serif;
+  --font-mono:    'DM Mono', monospace;
+}
+
+:root[data-theme="linen"] {
+  --bg:        #f4f1eb;
+  --bgAlt:     #eae6de;
+  --card:      #fbf9f5;
+  --sheet:     #ffffff;
+  --nav:       #fbf9f5;
+  --border:    #dcd5c9;
+  --text:      #2a2e30;
+  --muted:     #797067;
+  --accent:    #8c6b45;
+  --accentL:   #6e5537;
+  --onAccent:  #fbf9f5;
+  --green:     #3f7a55;
+  --red:       #a8452f;
+  --redL:      #8e3524;
+  --dangerBg:  #f7e4df;
+  --amber:     #a9761a;
+  --tierE:     #3d7a4f;
+  --tierL:     #8a6520;
+  --tierS:     #6b3f92;
+  --hairline:  rgba(0,0,0,0.07);
+  --scrim:     rgba(0,0,0,0.45);
+  --pinned:    rgba(140,107,69,0.07);
+}
+
+:root[data-theme="night"] {
   --bg:        #1c1f21;
   --bgAlt:     #15181a;
   --card:      #23272a;
@@ -31,46 +100,12 @@
   --redL:      #e08a72;
   --dangerBg:  #2e1815;
   --amber:     #d19a3c;
-  /* Budget tiers — used as text, so they need a per-theme value */
   --tierE:     #5a9a6a;
   --tierL:     #c8954a;
   --tierS:     #8a5ab0;
-  /* Barely-there divider inside a card, and the modal scrim */
   --hairline:  rgba(255,255,255,0.05);
   --scrim:     rgba(0,0,0,0.85);
   --pinned:    rgba(200,160,80,0.05);
-  --radius:    10px;
-  --font-display: 'Playfair Display', serif;
-  --font-body:    'Lato', sans-serif;
-  --font-mono:    'DM Mono', monospace;
-}
-
-:root[data-theme="light"] {
-  --bg:        #f4f1eb;
-  --bgAlt:     #eae6de;
-  --card:      #fbf9f5;
-  --sheet:     #ffffff;
-  --nav:       #fbf9f5;
-  --border:    #dcd5c9;
-  --text:      #2a2e30;
-  --muted:     #798086;
-  --accent:    #8c6b45;
-  /* On a light ground the "lighter accent" has to go darker to stay legible —
-     it is used as a foreground colour for headings and figures. */
-  --accentL:   #6e5537;
-  --onAccent:  #fbf9f5;
-  --green:     #3f7a55;
-  --red:       #a8452f;
-  --redL:      #8e3524;
-  --dangerBg:  #f7e4df;
-  --amber:     #a9761a;
-  /* Darkened so the tier chips and figures stay legible on linen */
-  --tierE:     #3d7a4f;
-  --tierL:     #8a6520;
-  --tierS:     #6b3f92;
-  --hairline:  rgba(0,0,0,0.07);
-  --scrim:     rgba(0,0,0,0.45);
-  --pinned:    rgba(140,107,69,0.07);
 }
 
 html, body, #root { height: 100%; }
@@ -90,8 +125,8 @@ input, button, select, textarea {
 
 /* Native controls follow the theme, so date pickers and number spinners
    don't render as light widgets on the dark palette (or vice versa). */
-:root { color-scheme: dark; }
-:root[data-theme="light"] { color-scheme: light; }
+:root { color-scheme: light; }
+:root[data-theme="night"] { color-scheme: dark; }
 
 button { cursor: pointer; }
 
