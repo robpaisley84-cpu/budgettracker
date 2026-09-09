@@ -23,6 +23,8 @@ export default function Allocations() {
   const [distRows, setDistRows]   = useState([])
   const [distSaving, setDistSaving] = useState(false)
   const [distErr, setDistErr]     = useState('')
+  const [renamingRule, setRenamingRule] = useState(null)
+  const [ruleNameVal, setRuleNameVal]   = useState('')
 
   useEffect(() => { if (household) load() }, [household])
 
@@ -121,6 +123,16 @@ export default function Allocations() {
 
   async function deleteRule(id) {
     await supabase.from('allocation_rules').update({ is_active: false }).eq('id', id)
+    load()
+  }
+
+  // A rule's name is its own record — it shows up in the description of every
+  // allocation transaction it creates, so a stale one is worth fixing.
+  async function saveRuleName(id) {
+    const name = ruleNameVal.trim()
+    if (!name) { setRenamingRule(null); setRuleNameVal(''); return }
+    await supabase.from('allocation_rules').update({ name }).eq('id', id)
+    setRenamingRule(null); setRuleNameVal('')
     load()
   }
 
@@ -308,8 +320,19 @@ export default function Allocations() {
         {rules.map((r, i) => (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', padding: '0.7rem 0.9rem', borderBottom: i < rules.length-1 ? '1px solid var(--border)' : 'none', gap: '0.6rem' }}>
             <span>{r.account?.icon || '🏦'}</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{r.name}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {renamingRule === r.id ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <input value={ruleNameVal} onChange={e => setRuleNameVal(e.target.value)} autoFocus
+                    onKeyDown={e => { if (e.key === 'Enter') saveRuleName(r.id); if (e.key === 'Escape') { setRenamingRule(null); setRuleNameVal('') } }}
+                    style={{ width: '9rem', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '0.15rem 0.35rem', color: 'var(--text)', fontSize: '0.8rem', outline: 'none' }} />
+                  <button onClick={() => saveRuleName(r.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: 'var(--onAccent)', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
+                  <button onClick={() => { setRenamingRule(null); setRuleNameVal('') }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
+                </span>
+              ) : (
+                <div onClick={() => { setRenamingRule(r.id); setRuleNameVal(r.name) }} title="Tap to rename"
+                  style={{ fontSize: '0.82rem', color: 'var(--text)', cursor: 'pointer' }}>{r.name}</div>
+              )}
               <div style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>{r.account?.name}</div>
             </div>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: r.account?.color || 'var(--accentL)' }}>{fmt(r.amount)}</span>

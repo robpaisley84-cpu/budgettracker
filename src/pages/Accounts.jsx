@@ -57,11 +57,27 @@ export default function Accounts() {
   // what the user says is really there — the same plug migration 012 used.
   async function saveTrueUp() {
     const acc = modal === 'trueup' ? form.acc : null
-    if (!acc || form.actual === '' || form.actual == null) return
+    if (!acc) return
     setSaving(true)
-    const txnEffect = +acc.balance - (+acc.opening_balance || 0)
-    const newOpening = Math.round((+form.actual - txnEffect) * 100) / 100
-    const { error } = await supabase.from('accounts').update({ opening_balance: newOpening }).eq('id', acc.id)
+
+    const patch = {}
+
+    // An account's name is its own record — renaming the matching budget line
+    // does not touch it, so it has to be editable here.
+    const newName = (form.name ?? '').trim()
+    if (newName && newName !== acc.name) patch.name = newName
+
+    // Balance is derived (opening_balance + history), so "true up" means
+    // solving for the opening balance that makes today's figure match what the
+    // user says is really there — the plug technique from migration 012.
+    if (form.actual !== '' && form.actual != null) {
+      const txnEffect = +acc.balance - (+acc.opening_balance || 0)
+      patch.opening_balance = Math.round((+form.actual - txnEffect) * 100) / 100
+    }
+
+    if (Object.keys(patch).length === 0) { setSaving(false); setModal(null); setForm({}); return }
+
+    const { error } = await supabase.from('accounts').update(patch).eq('id', acc.id)
     if (error) {
       setErr(`Couldn't update ${acc.name}: ${error.message}`)
       setSaving(false)
@@ -129,8 +145,8 @@ export default function Accounts() {
         {accounts.map(a => {
           const pct = a.target_balance ? Math.min((+a.balance / +a.target_balance) * 100, 100) : null
           return (
-            <div key={a.id} onClick={() => { setModal('trueup'); setForm({ acc: a, actual: String(Math.round(+a.balance * 100) / 100) }) }}
-              role="button" title="Set the real balance"
+            <div key={a.id} onClick={() => { setModal('trueup'); setForm({ acc: a, name: a.name, actual: String(Math.round(+a.balance * 100) / 100) }) }}
+              role="button" title="Rename or set the real balance"
               style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem 1rem', cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: pct !== null ? '0.6rem' : 0 }}>
                 <span style={{ fontSize: '1.3rem' }}>{a.icon}</span>
@@ -166,6 +182,11 @@ export default function Accounts() {
             {modal === 'trueup' && form.acc && (
               <>
                 <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{form.acc.icon} {form.acc.name}</div>
+
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Account name</label>
+                <input value={form.name ?? ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Lincoln's Savings"
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.9rem', outline: 'none', marginBottom: '0.85rem' }} />
+
                 <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '1rem' }}>
                   Showing <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{fmt(form.acc.balance)}</b> from an opening balance of {fmt(form.acc.opening_balance || 0)} plus everything logged since.
                   Enter what the account really holds and the opening balance is adjusted to match — your transaction history is left alone.

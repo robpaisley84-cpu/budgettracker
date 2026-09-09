@@ -27,6 +27,8 @@ export default function Budget() {
   const [renameVal, setRenameVal]     = useState('')
   const [confirmDel, setConfirmDel]   = useState(null)
   const [confirmCat, setConfirmCat]   = useState(null)
+  const [renamingCat, setRenamingCat] = useState(null)
+  const [catNameVal, setCatNameVal]   = useState('')
   const [showAddItem, setShowAddItem] = useState(null)
   const [showAddCat, setShowAddCat]   = useState(false)
   const [form, setForm]               = useState({})
@@ -139,6 +141,15 @@ export default function Budget() {
     load()
   }
 
+  async function saveCatName(catId) {
+    const name = catNameVal.trim()
+    if (!name) { setRenamingCat(null); setCatNameVal(''); return }
+    setSaving(true)
+    await supabase.from('budget_categories').update({ name }).eq('id', catId)
+    setRenamingCat(null); setCatNameVal(''); setSaving(false)
+    load()
+  }
+
   async function deleteCategory(catId) {
     await supabase.from('budget_items').update({ is_active: false }).match({ category_id: catId })
     await supabase.from('budget_categories').delete().eq('id', catId)
@@ -199,7 +210,18 @@ export default function Budget() {
             <div key={cat.id} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: '0.6rem', overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', padding: '0.7rem 0.9rem', cursor: 'pointer', gap: '0.5rem' }}>
                 <span onClick={() => toggle(cat.id)}>{cat.icon}</span>
-                <span onClick={() => toggle(cat.id)} style={{ flex: 1, fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)' }}>{cat.name}</span>
+                {renamingCat === cat.id ? (
+                  <span style={{ flex: 1, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <input value={catNameVal} onChange={e => setCatNameVal(e.target.value)} autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter') saveCatName(cat.id); if (e.key === 'Escape') { setRenamingCat(null); setCatNameVal('') } }}
+                      style={{ flex: 1, minWidth: 0, background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '0.2rem 0.4rem', color: 'var(--text)', fontSize: '0.85rem', fontWeight: 700, outline: 'none' }} />
+                    <button onClick={() => saveCatName(cat.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: 'var(--onAccent)', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
+                    <button onClick={() => { setRenamingCat(null); setCatNameVal('') }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
+                  </span>
+                ) : (
+                  <span onClick={() => { setRenamingCat(cat.id); setCatNameVal(cat.name) }} title="Tap to rename"
+                    style={{ flex: 1, fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)' }}>{cat.name}</span>
+                )}
                 <div onClick={() => toggle(cat.id)} style={{ textAlign: 'right' }}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: over ? 'var(--red)' : cat.color }}>
                     {catSpent > 0 ? fmt(catSpent) : '—'}
