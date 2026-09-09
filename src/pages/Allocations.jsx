@@ -19,6 +19,7 @@ export default function Allocations() {
   const [items, setItems]         = useState([])
   const [showPaycheck, setShowPaycheck] = useState(false)
   const [paycheckAmt, setPaycheckAmt] = useState(household?.paycheck_amount || 4212)
+  const [payDate, setPayDate]         = useState(format(new Date(), 'yyyy-MM-dd'))
   const [processing, setProcessing] = useState(false)
   const [processErr, setProcessErr] = useState('')
   const [loading, setLoading]     = useState(true)
@@ -178,8 +179,10 @@ export default function Allocations() {
     if (!checking) { setProcessErr('Add a checking account first — the paycheck has to land somewhere.'); return }
     setProcessing(true); setProcessErr('')
 
-    const today = format(new Date(), 'yyyy-MM-dd')
-    const month = today.slice(0, 7)
+    // The date the check actually landed — so a paycheck entered late still
+    // sits in the right month, and its split sits with the expenses it paid for.
+    const day   = payDate || format(new Date(), 'yyyy-MM-dd')
+    const month = day.slice(0, 7)
     const amt   = +paycheckAmt
 
     // paychecks has only net_amount — the original code also sent gross_amount,
@@ -188,7 +191,7 @@ export default function Allocations() {
     const { data: pc, error: pcErr } = await supabase.from('paychecks').insert({
       household_id: household.id,
       net_amount: amt,
-      date: today,
+      date: day,
       created_by: user.id,
     }).select('*').single()
     if (pcErr || !pc) { setProcessErr(`Couldn't log the paycheck: ${pcErr?.message || 'unknown error'}`); setProcessing(false); return }
@@ -200,7 +203,7 @@ export default function Allocations() {
       type: 'income',
       amount: amt,
       description: 'Paycheck',
-      date: today, budget_month: month,
+      date: day, budget_month: month,
       created_by: user.id,
     })
     if (incErr) { setProcessErr(`Paycheck logged, but the deposit into ${checking.name} failed: ${incErr.message}`); setProcessing(false); return }
@@ -228,7 +231,7 @@ export default function Allocations() {
           <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: 'var(--accent)', textTransform: 'uppercase' }}>{FREQ_LABEL[household?.pay_frequency] || 'Bi-Weekly'}</div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)' }}>Paycheck</div>
         </div>
-        <button onClick={() => { setShowPaycheck(true); setProcessErr('') }} style={{ background: 'var(--green)', border: 'none', color: 'var(--onAccent)', borderRadius: '8px', padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.82rem' }}>▶ Process Paycheck</button>
+        <button onClick={() => { setShowPaycheck(true); setProcessErr(''); setPayDate(format(new Date(), 'yyyy-MM-dd')) }} style={{ background: 'var(--green)', border: 'none', color: 'var(--onAccent)', borderRadius: '8px', padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.82rem' }}>▶ Process Paycheck</button>
       </div>
 
       {/* Plan summary for one check */}
@@ -384,6 +387,12 @@ export default function Allocations() {
               <span style={{ color: 'var(--green)', fontSize: '1.1rem', marginRight: '0.3rem' }}>$</span>
               <input type="number" value={paycheckAmt} onChange={e => setPaycheckAmt(e.target.value)} autoFocus
                 style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--green)', fontSize: '1.3rem', fontFamily: 'var(--font-mono)', padding: '0.55rem 0' }} />
+            </div>
+            <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Date it landed</label>
+            <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.55rem 0.7rem', color: 'var(--text)', fontSize: '0.9rem', fontFamily: 'var(--font-mono)', outline: 'none', marginBottom: '0.35rem' }} />
+            <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.45 }}>
+              Back-date a check you're entering late so it lands in the right month alongside the expenses it paid for.
             </div>
             {processErr && <div style={{ fontSize: '0.72rem', color: 'var(--red)', marginBottom: '0.75rem' }}>⚠️ {processErr}</div>}
             <button onClick={processPaycheck} disabled={processing} style={{ width: '100%', background: 'var(--green)', border: 'none', borderRadius: '8px', padding: '0.85rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
