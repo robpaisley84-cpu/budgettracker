@@ -13,13 +13,16 @@ import { computeAccrual } from './accrual'
 const round2 = (n) => Math.round(n * 100) / 100
 const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd')
 
-// How much of one check a monthly plan implies. Approximate by design — it is a
-// starting suggestion, not a rule. (Shared with the paycheck page.)
-export const CHECKS_PER_MONTH = { weekly: 4, biweekly: 2, semimonthly: 2, monthly: 1 }
+// Paydays in a YEAR — the only figure that is exact. Months are the awkward
+// unit here: bi-weekly pay lands 26 times a year, which is 2.167 times a month,
+// not 2. Dividing a monthly plan by 2 over-asks by about 8% on every single
+// check, which is enough to make a budget that fits look like one that doesn't.
+export const CHECKS_PER_YEAR = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 }
 
+/** How much of one check a monthly plan implies. */
 export function perCheckShare(monthlyAmount, payFrequency) {
-  const checks = CHECKS_PER_MONTH[payFrequency || 'biweekly'] || 2
-  return round2((+monthlyAmount || 0) / checks)
+  const perYear = CHECKS_PER_YEAR[payFrequency || 'biweekly'] || 26
+  return round2(((+monthlyAmount || 0) * 12) / perYear)
 }
 
 /** Paydays falling in [from, to], with the net amount expected on each. */

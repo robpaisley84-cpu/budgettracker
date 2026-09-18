@@ -5,10 +5,9 @@ import { useAuth } from '../contexts/AuthContext'
 import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO, differenceInCalendarDays, differenceInCalendarMonths } from 'date-fns'
 import { computeAccrual, isAutoAccrued } from '../lib/accrual'
 import { linesPerAccount, isSoleOccupant, anchorsFor, spendSinceAnchor, allocatedSinceAnchor, fundBalance } from '../lib/funds'
+import { CHECKS_PER_YEAR } from '../lib/projection'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
-
-const CHECKS_PER_YEAR = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 }
 
 // How many paydays actually land inside the given calendar month.
 // Bi-weekly/weekly are stepped from a known anchor payday, so most months
