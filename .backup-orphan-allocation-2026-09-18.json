@@ -1,0 +1,24 @@
+{
+  "_why": "Orphan 'allocation' transaction deleted during the 2026-09-18 cleanup. Written by the pre-014 paycheck code ('Paycheck - remaining to checking') on 2026-09-08, when the paychecks insert silently failed on the gross_amount bug. It had no paycheck_id and no budget_item_id, and the accounts_with_balance view counts type='allocation' as money in, so it inflated Checking by 3806.00. Restore with the INSERT below if this turns out to have been wrong.",
+  "_restore_sql": "INSERT INTO transactions (id, household_id, account_id, to_account_id, budget_item_id, type, amount, description, date, budget_month, created_by, created_at, paycheck_id) VALUES ('40b97a74-5bab-4308-93fa-7ff9a50e8b95', 'da80550c-9349-4166-b8b9-dd7bf51558a7', 'f0452009-1835-4b1d-9b40-e11b724abdf5', NULL, NULL, 'allocation', 3806.00, 'Paycheck — remaining to checking', '2026-09-08', '2026-09', '5468e732-38bd-409f-9117-d188e84c9092', '2026-09-08T17:34:43.534Z', NULL);",
+  "row": {
+    "id": "40b97a74-5bab-4308-93fa-7ff9a50e8b95",
+    "household_id": "da80550c-9349-4166-b8b9-dd7bf51558a7",
+    "account_id": "f0452009-1835-4b1d-9b40-e11b724abdf5",
+    "to_account_id": null,
+    "budget_item_id": null,
+    "type": "allocation",
+    "amount": "3806.00",
+    "description": "Paycheck — remaining to checking",
+    "date": "2026-09-08T04:00:00.000Z",
+    "budget_month": "2026-09",
+    "created_by": "5468e732-38bd-409f-9117-d188e84c9092",
+    "created_at": "2026-09-08T17:34:43.534Z",
+    "paycheck_id": null
+  },
+  "_prior_account_state": {
+    "Checking": { "opening_balance": -757.26, "displayed": 5711.00 },
+    "Emergency Fund": { "opening_balance": -970.00, "displayed": -1470.00 },
+    "Lincoln's Savings": { "opening_balance": -1585.34, "displayed": -1585.34 }
+  }
+}

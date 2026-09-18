@@ -389,6 +389,24 @@ export default function Allocations() {
     const fresh = await load()
     const freshChecking = fresh.accounts.find(a => a.type === 'checking') || checking
     const rows = planRows(amt, {}, fresh.items, freshChecking)
+
+    // If the plan asks for more than the check brings in, do NOT write it. The
+    // distribute sheet refuses to store a split that doesn't balance, and payday
+    // must not quietly do what the sheet refuses to do openly — that would
+    // earmark money the account never received. Hand it over to be resolved.
+    const planned = rows.reduce((s, r) => s + (+r.amount || 0), 0)
+    if (planned - amt > 0.005) {
+      setProcessing(false)
+      setShowPaycheck(false)
+      setDistPaycheck(pc)
+      savedRef.current = {}
+      setDistRows(rows)
+      setDistErr(`Deposited ${fmt(amt)} — but the plan asks for ${fmt(planned)}, which is ${fmt(planned - amt)} more than this check. Nothing has been split yet. Trim the lines below and they'll save as you go.`)
+      setDistStatus('clean')
+      setShowDistribute(true)
+      return
+    }
+
     const { saved, error: splitErr } = await applyRows(pc, rows, freshChecking)
     setProcessing(false)
     setShowPaycheck(false)
