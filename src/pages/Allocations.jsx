@@ -1,16 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, startOfDay } from 'date-fns'
 import { computeAccrual, isAutoAccrued } from '../lib/accrual'
+import { perCheckShare } from '../lib/projection'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
 const FREQ_LABEL = { weekly: 'Weekly', biweekly: 'Bi-Weekly', semimonthly: 'Semi-Monthly', monthly: 'Monthly' }
 
-// How much of one check a monthly plan implies. Approximate by design — it is
-// a starting suggestion you then adjust, not a rule.
-const CHECKS_PER_MONTH = { weekly: 4, biweekly: 2, semimonthly: 2, monthly: 1 }
 
 export default function Allocations() {
   const { household, user } = useAuth()
@@ -28,6 +26,29 @@ export default function Allocations() {
   const [distRows, setDistRows]   = useState([])
   const [distSaving, setDistSaving] = useState(false)
   const [distErr, setDistErr]     = useState('')
+  // 'clean' nothing to write · 'pending' edits waiting on the debounce ·
+  // 'saving' · 'saved' · 'blocked' over-assigned, deliberately not written
+  const [distStatus, setDistStatus] = useState('clean')
+  // What payday just did, shown instead of making you fill the form in
+  const [flash, setFlash] = useState(null)
+
+  // --- Autosave plumbing for the distribute sheet -------------------------
+  // The sheet used to hold every amount in React state until you pressed Save,
+  // so one stray tap lost the lot. Now each row is written shortly after you
+  // stop typing. These refs carry the bits the debounce needs without making
+  // the timer restart on every render.
+  //
+  // savedRef: budget_item_id -> what is currently in the database for this
+  // paycheck, and the row ids to update in place. Updating beats
+  // delete-and-reinsert because both tables are audited (migration 007) and a
+  // delete/insert pair per keystroke-pause would bury the Activity feed.
+  const savedRef    = useRef({})
+  const distRowsRef = useRef([])
+  const timerRef    = useRef(null)
+  const queueRef    = useRef(Promise.resolve())   // writes run one at a time
+
+  useEffect(() => { distRowsRef.current = distRows }, [distRows])
+  useEffect(() => () => clearTimeout(timerRef.current), [])
 
   useEffect(() => { if (household) load() }, [household])
 
@@ -44,6 +65,9 @@ export default function Allocations() {
     setPaychecks(p || [])
     setItems(bi || [])
     setLoading(false)
+    // Returned as well as stored: payday needs to build a split from these the
+    // moment they land, and the state setters above won't have applied yet.
+    return { accounts: a || [], paychecks: p || [], items: bi || [] }
   }
 
   const checking = accounts.find(a => a.type === 'checking') || null
@@ -53,23 +77,22 @@ export default function Allocations() {
     const perMonth = isAutoAccrued(item)
       ? (computeAccrual(item)?.accrual ?? +item.budgeted_amount)
       : +item.budgeted_amount
-    const checks = CHECKS_PER_MONTH[household?.pay_frequency || 'biweekly'] || 2
-    return Math.round((perMonth / checks) * 100) / 100
+    return perCheckShare(perMonth, household?.pay_frequency)
   }
 
   // The plan applied to one paycheck: every line at its suggested share, and
   // whatever is left lands in the remainder line so every dollar has a job.
   // The remainder line's own suggestion is shown for reference only — it
   // absorbs the leftover, plan or not.
-  function planRows(netAmount, already = {}) {
-    const rows = items.map(i => ({
+  function planRows(netAmount, already = {}, itemsList = items, checkingAcct = checking) {
+    const rows = itemsList.map(i => ({
       id: i.id,
       name: i.name,
       icon: i.category?.icon || '📋',
       catSort: i.category?.sort_order ?? 99,
       suggested: suggestedFor(i),
       accountId: i.account_id,
-      ownAccount: !!(i.account_id && checking && i.account_id !== checking.id),
+      ownAccount: !!(i.account_id && checkingAcct && i.account_id !== checkingAcct.id),
       isRemainder: !!i.is_remainder_target,
       amount: '',
     })).sort((a, b) => (a.isRemainder - b.isRemainder) || a.catSort - b.catSort || a.name.localeCompare(b.name))
@@ -100,80 +123,233 @@ export default function Allocations() {
     return rows.map(r => r.isRemainder ? { ...r, amount: String(left) } : r)
   }
 
+  // Read back what is already stored for this paycheck: the envelope amount per
+  // line, plus the ids of the rows holding it so autosave can update them
+  // rather than recreate them. Historic data may hold more than one row per
+  // line, so keep them all — the first is updated, the rest tidied away on the
+  // next write.
+  async function loadSaved(paycheckId) {
+    const [{ data: allocs, error: aErr }, { data: txs, error: tErr }] = await Promise.all([
+      supabase.from('paycheck_allocations').select('id, budget_item_id, amount').eq('paycheck_id', paycheckId),
+      supabase.from('transactions').select('id, budget_item_id').eq('paycheck_id', paycheckId).eq('type', 'transfer'),
+    ])
+    if (aErr || tErr) return { saved: null, error: aErr || tErr }
+
+    const saved = {}
+    const entry = (id) => (saved[id] ||= { amount: 0, allocIds: [], txIds: [] })
+    allocs?.forEach(a => {
+      const e = entry(a.budget_item_id)
+      e.amount += +a.amount
+      e.allocIds.push(a.id)
+    })
+    txs?.forEach(t => { if (t.budget_item_id) entry(t.budget_item_id).txIds.push(t.id) })
+    return { saved, error: null }
+  }
+
   // Open the distribute sheet for a paycheck, pre-filled with whatever is
   // already allocated to it, falling back to the plan.
   async function openDistribute(paycheck) {
     setDistPaycheck(paycheck)
     setDistErr('')
-    const { data: existing } = await supabase
-      .from('paycheck_allocations')
-      .select('budget_item_id, amount')
-      .eq('paycheck_id', paycheck.id)
+    const { saved, error } = await loadSaved(paycheck.id)
+    if (error) {
+      // Opening on a bad read would show zeros and then autosave them over the
+      // top of good data. Refuse instead.
+      setDistErr(`Couldn't read this paycheck's split: ${error.message}`)
+      savedRef.current = {}
+      setDistRows([])
+      setDistStatus('clean')
+      setShowDistribute(true)
+      return
+    }
+    savedRef.current = saved
     const already = {}
-    existing?.forEach(e => { already[e.budget_item_id] = (already[e.budget_item_id] || 0) + +e.amount })
+    Object.entries(saved).forEach(([id, e]) => { already[id] = e.amount })
     setDistRows(planRows(+paycheck.net_amount, already))
+    setDistStatus('clean')
     setShowDistribute(true)
   }
 
-  // Replace this paycheck's distribution wholesale. Two kinds of record:
-  //   * a paycheck_allocations row per funded line (the envelope entry), and
+  // Write one line's share of this paycheck. Two kinds of record:
+  //   * a paycheck_allocations row (the envelope entry), and
   //   * for a line that lives in its own account, a real transfer from checking
-  //     to that account, tagged with the paycheck so it can be replaced too.
+  //     to that account, tagged with the paycheck so it can be revised too.
   // Moves between funds carry no paycheck_id and are untouched by this.
-  async function saveDistribution() {
-    if (!distPaycheck) return
+  //
+  // Existing rows are UPDATED, never delete-and-reinserted: both tables are
+  // audited, and recreating them on every pause in typing would flood Activity
+  // and churn real money in and out of the savings accounts mid-edit.
+  // Returns a Supabase error, or null when the row is stored.
+  async function persistRow(r, pid, date, month, saved = savedRef.current, checkingAcct = checking) {
+    const prev   = saved[r.id]
+    const target = Math.round((+r.amount || 0) * 100) / 100
+    if (!prev && target === 0) return null        // nothing stored, nothing to store
+    if (prev && prev.amount === target) return null
+
+    // --- the envelope entry ---
+    let allocIds = prev ? [...prev.allocIds] : []
+    if (target > 0 && allocIds.length) {
+      const [keep, ...extra] = allocIds
+      const { error } = await supabase.from('paycheck_allocations')
+        .update({ amount: target, date, budget_month: month }).eq('id', keep)
+      if (error) return error
+      if (extra.length) {
+        const { error: dupErr } = await supabase.from('paycheck_allocations').delete().in('id', extra)
+        if (dupErr) return dupErr
+      }
+      allocIds = [keep]
+    } else if (target > 0) {
+      const { data, error } = await supabase.from('paycheck_allocations').insert({
+        household_id: household.id,
+        paycheck_id: pid,
+        budget_item_id: r.id,
+        amount: target,
+        date, budget_month: month,
+        created_by: user.id,
+        note: 'Paycheck allocation',
+      }).select('id').single()
+      if (error) return error
+      allocIds = [data.id]
+    } else if (allocIds.length) {
+      const { error } = await supabase.from('paycheck_allocations').delete().in('id', allocIds)
+      if (error) return error
+      allocIds = []
+    }
+
+    // --- the real transfer, for a line backed by its own account ---
+    let txIds = prev ? [...prev.txIds] : []
+    const wantsTransfer = !!(checkingAcct && r.ownAccount && target > 0)
+    if (wantsTransfer && txIds.length) {
+      const [keep, ...extra] = txIds
+      const { error } = await supabase.from('transactions').update({
+        amount: target, to_account_id: r.accountId, account_id: checkingAcct.id,
+        description: `Funding: ${r.name}`, date, budget_month: month,
+      }).eq('id', keep)
+      if (error) return error
+      if (extra.length) {
+        const { error: dupErr } = await supabase.from('transactions').delete().in('id', extra)
+        if (dupErr) return dupErr
+      }
+      txIds = [keep]
+    } else if (wantsTransfer) {
+      const { data, error } = await supabase.from('transactions').insert({
+        household_id: household.id,
+        paycheck_id: pid,
+        budget_item_id: r.id,
+        account_id: checkingAcct.id,
+        to_account_id: r.accountId,
+        type: 'transfer',
+        amount: target,
+        description: `Funding: ${r.name}`,
+        date, budget_month: month,
+        created_by: user.id,
+      }).select('id').single()
+      if (error) return error
+      txIds = [data.id]
+    } else if (txIds.length) {
+      const { error } = await supabase.from('transactions').delete().in('id', txIds)
+      if (error) return error
+      txIds = []
+    }
+
+    saved[r.id] = { amount: target, allocIds, txIds }
+    return null
+  }
+
+  // Queue a write behind whatever is already running. Two writers at once would
+  // race on the row ids in savedRef, and — more to the point — awaiting this has
+  // to genuinely mean "everything typed so far is stored", or pressing Done
+  // mid-save would close over an edit that never landed.
+  function flushDistribution() {
+    clearTimeout(timerRef.current)
+    const next = queueRef.current.then(() => writeDirtyRows())
+    queueRef.current = next.catch(() => {})   // one failure must not jam the queue
+    return next
+  }
+
+  // Write every row that differs from what is stored. Returns false if anything
+  // could not be written, so the caller knows not to close over unsaved numbers.
+  async function writeDirtyRows() {
+    if (!distPaycheck) return true
+    const rows = distRowsRef.current
+    if (!rows.length) return true
+
+    // A half-typed number can briefly ask for more than the check holds. Hold
+    // off rather than store a split that doesn't balance — the same guard the
+    // Save button always had.
+    const assigned = rows.reduce((s, r) => s + (+r.amount || 0), 0)
+    if (assigned - +distPaycheck.net_amount > 0.005) { setDistStatus('blocked'); return false }
+
+    const changed = rows.filter(r => {
+      const prev = savedRef.current[r.id]
+      const target = Math.round((+r.amount || 0) * 100) / 100
+      return prev ? prev.amount !== target : target > 0
+    })
+    if (!changed.length) { setDistStatus(s => s === 'clean' ? 'clean' : 'saved'); return true }
+
     setDistSaving(true)
-    const pid = distPaycheck.id
-    const date = distPaycheck.date
+    setDistStatus('saving')
+    const pid   = distPaycheck.id
+    const date  = distPaycheck.date
     const month = String(date).slice(0, 7)
 
-    await supabase.from('paycheck_allocations').delete().eq('paycheck_id', pid)
-    await supabase.from('transactions').delete().eq('paycheck_id', pid).eq('type', 'transfer')
-
-    const funded = distRows.filter(r => +r.amount > 0)
-
-    const allocRows = funded.map(r => ({
-      household_id: household.id,
-      paycheck_id: pid,
-      budget_item_id: r.id,
-      amount: +r.amount,
-      date, budget_month: month,
-      created_by: user.id,
-      note: 'Paycheck allocation',
-    }))
-    if (allocRows.length) {
-      const { error } = await supabase.from('paycheck_allocations').insert(allocRows)
-      if (error) { setDistErr(`Couldn't save: ${error.message}`); setDistSaving(false); return }
+    let failure = null
+    for (const r of changed) {
+      failure = await persistRow(r, pid, date, month)
+      if (failure) break
     }
 
-    const transferRows = checking
-      ? funded.filter(r => r.ownAccount).map(r => ({
-          household_id: household.id,
-          paycheck_id: pid,
-          budget_item_id: r.id,
-          account_id: checking.id,
-          to_account_id: r.accountId,
-          type: 'transfer',
-          amount: +r.amount,
-          description: `Funding: ${r.name}`,
-          date, budget_month: month,
-          created_by: user.id,
-        }))
-      : []
-    if (transferRows.length) {
-      const { error } = await supabase.from('transactions').insert(transferRows)
-      if (error) { setDistErr(`Envelopes saved, but the transfers didn't: ${error.message}`); setDistSaving(false); return }
-    }
-
-    setDistErr('')
     setDistSaving(false)
+    if (failure) {
+      setDistErr(`Couldn't save: ${failure.message} — your numbers are still on screen, try again.`)
+      setDistStatus('pending')
+      return false
+    }
+    setDistErr('')
+    setDistStatus('saved')
+    return true
+  }
+
+  // The debounce fires long after the render that scheduled it, so go through a
+  // ref to reach the current closure rather than a stale one.
+  const flushRef = useRef(flushDistribution)
+  useEffect(() => { flushRef.current = flushDistribution })
+
+  const SAVE_DELAY = 700
+  const scheduleSave = useCallback(() => {
+    clearTimeout(timerRef.current)
+    setDistStatus('pending')
+    timerRef.current = setTimeout(() => flushRef.current(), SAVE_DELAY)
+  }, [])
+  // Leaving a field is a clear "I'm done with this one" — don't wait it out.
+  const flushNow = useCallback(() => { clearTimeout(timerRef.current); return flushRef.current() }, [])
+
+  async function closeDistribute() {
+    const ok = await flushNow()
+    if (!ok) return              // error or over-assigned: keep the numbers on screen
     setShowDistribute(false)
+    setDistStatus('clean')
     load()
   }
 
-  // A paycheck is income into checking. Log it, then hand straight to the
-  // distribute sheet pre-filled at plan with the leftover already assigned, so
-  // the usual case is: glance, adjust anything, save.
+  // Apply a whole split in one go, against a fresh (empty) saved map. Used by
+  // payday, which writes the plan without anyone opening the sheet.
+  async function applyRows(paycheck, rows, checkingAcct) {
+    const pid   = paycheck.id
+    const date  = paycheck.date
+    const month = String(date).slice(0, 7)
+    const saved = {}
+    for (const r of rows) {
+      const err = await persistRow(r, pid, date, month, saved, checkingAcct)
+      if (err) return { saved, error: err }
+    }
+    return { saved, error: null }
+  }
+
+  // A paycheck is income into checking, and the split that follows is already
+  // fully described by the budget config — each line's plan and the account it
+  // lives in (014). So payday writes it: deposit, split, transfer, done. The
+  // distribute sheet stays for the check you want to differ from plan.
   async function processPaycheck() {
     if (!paycheckAmt || processing) return
     if (!checking) { setProcessErr('Add a checking account first — the paycheck has to land somewhere.'); return }
@@ -208,13 +384,33 @@ export default function Allocations() {
     })
     if (incErr) { setProcessErr(`Paycheck logged, but the deposit into ${checking.name} failed: ${incErr.message}`); setProcessing(false); return }
 
+    // Build the split from what the database says right now, not from state the
+    // setters above haven't applied yet — this writes real transfers.
+    const fresh = await load()
+    const freshChecking = fresh.accounts.find(a => a.type === 'checking') || checking
+    const rows = planRows(amt, {}, fresh.items, freshChecking)
+    const { saved, error: splitErr } = await applyRows(pc, rows, freshChecking)
     setProcessing(false)
     setShowPaycheck(false)
-    await load()
-    setDistPaycheck(pc)
-    setDistRows(planRows(amt))
-    setDistErr('')
-    setShowDistribute(true)
+
+    if (splitErr) {
+      // The money is banked; only the split faltered. Hand over the sheet with
+      // whatever did land, rather than leaving the check silently unassigned.
+      setDistPaycheck(pc)
+      savedRef.current = saved
+      setDistRows(rows)
+      setDistErr(`Deposited, but the automatic split stopped partway: ${splitErr.message}. Check the amounts below — they save as you go.`)
+      setDistStatus('clean')
+      setShowDistribute(true)
+      return
+    }
+
+    setFlash({
+      paycheck: pc,
+      funded: rows.filter(r => +r.amount > 0).length,
+      moved:  rows.filter(r => r.ownAccount && +r.amount > 0).length,
+    })
+    load()
   }
 
   // Summary of the plan for one check
@@ -233,6 +429,25 @@ export default function Allocations() {
         </div>
         <button onClick={() => { setShowPaycheck(true); setProcessErr(''); setPayDate(format(new Date(), 'yyyy-MM-dd')) }} style={{ background: 'var(--green)', border: 'none', color: 'var(--onAccent)', borderRadius: '8px', padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.82rem' }}>▶ Process Paycheck</button>
       </div>
+
+      {/* What payday just did. The split is applied automatically, so this
+          reports it rather than asking for it. */}
+      {flash && (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--green)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text)', lineHeight: 1.5 }}>
+              <b style={{ color: 'var(--green)' }}>{fmt(flash.paycheck.net_amount)}</b> deposited into {checking?.name || 'checking'} and split across {flash.funded} budget line{flash.funded === 1 ? '' : 's'}
+              {flash.moved > 0 && <> · {flash.moved} transfer{flash.moved === 1 ? '' : 's'} to savings</>}.
+            </div>
+            <button onClick={() => setFlash(null)} aria-label="Dismiss"
+              style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '1rem', lineHeight: 1, padding: '0 0.2rem' }}>✕</button>
+          </div>
+          <button onClick={() => { setFlash(null); openDistribute(flash.paycheck) }}
+            style={{ marginTop: '0.6rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.45rem 0.75rem', color: 'var(--muted)', fontSize: '0.75rem' }}>
+            Adjust this check
+          </button>
+        </div>
+      )}
 
       {/* Plan summary for one check */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.9rem', marginBottom: '1rem' }}>
@@ -265,14 +480,32 @@ export default function Allocations() {
         const net = +distPaycheck.net_amount
         const assigned = distRows.reduce((s, r) => s + (+r.amount || 0), 0)
         const left = Math.round((net - assigned) * 100) / 100
-        const edit = (id, val) => setDistRows(rows => withRemainder(rows.map(x => x.id === id ? { ...x, amount: val } : x), net))
+        const edit = (id, val) => {
+          setDistRows(rows => withRemainder(rows.map(x => x.id === id ? { ...x, amount: val } : x), net))
+          scheduleSave()
+        }
+        const status = {
+          clean:   null,
+          pending: { text: 'Saving…',        c: 'var(--muted)' },
+          saving:  { text: 'Saving…',        c: 'var(--muted)' },
+          saved:   { text: '✓ Saved',        c: 'var(--green)' },
+          blocked: { text: 'Not saved — over', c: 'var(--red)' },
+        }[distStatus]
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
-            onClick={e => { if (e.target === e.currentTarget) setShowDistribute(false) }}>
+          // Deliberately no click-to-dismiss: tapping off this sheet used to
+          // throw away everything typed into it. It closes from Done or ✕.
+          <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}>
             <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--green)', borderRadius: '16px 16px 0 0', padding: '1.1rem 1.1rem 1.6rem', width: '100%', maxWidth: '600px', margin: '0 auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.35rem' }}>Distribute paycheck</div>
-              <div style={{ fontSize: '0.95rem', color: 'var(--text)', marginBottom: '0.6rem' }}>
-                {format(startOfDay(new Date(distPaycheck.date + 'T12:00')), 'EEE, MMM d')} · {fmt(net)}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem' }}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.35rem' }}>Distribute paycheck</div>
+                <button onClick={closeDistribute} aria-label="Close"
+                  style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '1.1rem', lineHeight: 1, padding: '0 0.2rem' }}>✕</button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                <div style={{ fontSize: '0.95rem', color: 'var(--text)' }}>
+                  {format(startOfDay(new Date(distPaycheck.date + 'T12:00')), 'EEE, MMM d')} · {fmt(net)}
+                </div>
+                {status && <div style={{ fontSize: '0.6rem', color: status.c, whiteSpace: 'nowrap' }}>{status.text}</div>}
               </div>
 
               {/* With a remainder line this is 0 by construction; it only goes
@@ -311,6 +544,7 @@ export default function Allocations() {
                       <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>$</span>
                       <input type="number" step="0.01" value={r.amount} readOnly={r.isRemainder}
                         onChange={e => edit(r.id, e.target.value)}
+                        onBlur={r.isRemainder ? undefined : flushNow}
                         style={{ width: '4.6rem', background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', padding: '0.35rem 0', textAlign: 'right' }} />
                     </div>
                   </div>
@@ -318,17 +552,19 @@ export default function Allocations() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button onClick={() => setDistRows(planRows(net))}
+                <button onClick={() => { setDistRows(planRows(net)); scheduleSave() }}
                   style={{ flex: 1, background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.7rem', color: 'var(--muted)', fontSize: '0.8rem' }}>
                   Reset to plan
                 </button>
-                <button onClick={saveDistribution} disabled={distSaving || left < 0}
+                <button onClick={closeDistribute} disabled={distSaving || left < 0}
                   style={{ flex: 2, background: left < 0 ? 'var(--border)' : 'var(--green)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: left < 0 ? 'var(--muted)' : 'var(--onAccent)', fontWeight: 700, fontSize: '0.85rem' }}>
-                  {distSaving ? 'Saving…' : 'Save distribution'}
+                  {distSaving ? 'Saving…' : 'Done'}
                 </button>
               </div>
               <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.5rem', lineHeight: 1.45 }}>
-                Lines marked "moves" transfer from {checking?.name || 'checking'} to their own account. Money you've moved between funds isn't affected.
+                {left < 0
+                  ? 'Over-assigned — nothing is being saved until the lines fit the check.'
+                  : `Each amount saves as you enter it. Lines marked "moves" transfer from ${checking?.name || 'checking'} to their own account.`}
               </div>
             </div>
           </div>
@@ -380,7 +616,7 @@ export default function Allocations() {
           <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--green)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
             <div style={{ fontSize: '0.65rem', color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.25rem' }}>Process Paycheck</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
-              Deposits the check into <b style={{ color: 'var(--text)' }}>{checking?.name || 'checking'}</b>, then opens the split with every line at plan and the leftover already in {remainderLine ? <b style={{ color: 'var(--text)' }}>{remainderLine.name}</b> : 'the leftover line'}. Adjust anything, then save.
+              Deposits the check into <b style={{ color: 'var(--text)' }}>{checking?.name || 'checking'}</b> and splits it straight away — every line at its plan, the leftover into {remainderLine ? <b style={{ color: 'var(--text)' }}>{remainderLine.name}</b> : 'the leftover line'}, and a real transfer for each line that lives in its own savings account. Nothing to fill in; adjust afterwards only if this check needs to differ.
             </div>
             <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Net Paycheck Amount</label>
             <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--green)', borderRadius: '8px', padding: '0 0.85rem', marginBottom: '1rem' }}>

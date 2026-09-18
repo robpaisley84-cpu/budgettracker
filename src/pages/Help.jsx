@@ -39,7 +39,7 @@ export default function Help() {
       </Task>
 
       <Task icon="📅" title="On payday">
-        Go to <b>Paycheck</b> → <b>Process Paycheck</b> → confirm the net amount. The check is deposited into checking, then the split opens with every line filled at its plan and whatever's left already in your <b>Exit Fund</b>. Glance over it, change anything, <b>Save distribution</b>. Lines that live in their own savings account (Lincoln's, Disney, Emergency) actually move that money there.
+        Go to <b>Paycheck</b> → <b>Process Paycheck</b> → confirm the net amount and the date it landed. Everything else happens on its own: the check is deposited into checking, split across every line at its plan with whatever's left going to your <b>Exit Fund</b>, and each line that lives in its own savings account (Lincoln's, Disney, Emergency) gets a real transfer. There's no form to fill in — you only open the split if <i>this</i> check needs to differ from plan.
       </Task>
 
       <Task icon="🏦" title="Which account a budget line lives in">
@@ -55,7 +55,7 @@ export default function Help() {
       </Task>
 
       <Task icon="🔁" title="Re-split a paycheck you already processed">
-        On <b>Paycheck</b>, under <b>Distribute to Budget</b>, tap the check. Change any line and the leftover line adjusts itself so the check stays exactly spoken for. Saving replaces that check's split — and its transfers — without touching money you've moved between funds since.
+        On <b>Paycheck</b>, under <b>Distribute to Budget</b>, tap the check. Change any line and the leftover line adjusts itself so the check stays exactly spoken for. <b>Each amount saves on its own, a moment after you type it</b> — there's no Save button to miss and nothing to lose if you put the phone down. The sheet only closes from <b>Done</b> or <b>✕</b>. Money you've moved between funds since is left alone.
       </Task>
 
       <Task icon="↔️" title="Move money between funds when something runs over">
@@ -64,6 +64,14 @@ export default function Help() {
 
       <Task icon="🎯" title="Tell the app what a fund really holds">
         A fund's balance is what you've put into it, minus what you've spent from it. If a fund already held money before you started tracking, tap its <b>name</b> under Funds Available and enter the real figure — that becomes its opening balance, and everything counts up from there. Same on <b>Accounts</b>: tap a card to set its true balance.
+      </Task>
+
+      <Task icon="🧮" title="Split one account across several funds">
+        A savings account holding just one budget line <i>is</i> that line — one number, and it can never drift. If you keep several sinking funds in <b>one</b> account, its card on <b>Accounts</b> shows how much of the balance the lines have claimed and how much is still <b>unassigned</b>. Tap <b>Assign balance</b> to divide it up; each figure saves as you type it and becomes that fund's balance as of today. Nothing moves at the bank — you're describing money that's already there.
+      </Task>
+
+      <Task icon="📈" title="See where checking is headed">
+        At the top of <b>Accounts</b>, "Where checking is headed" walks today's balance forward through the paychecks and bills you've already scheduled, out to 90 days. The number above the line is the <b>low point</b> — the tightest it gets and when. Drag along the line to read any day, or tap <b>Show what's coming</b> for the same thing as a list. It's a projection, not a promise: it only knows about bills that have a due date, and it spreads flexible lines like groceries evenly across the month.
       </Task>
 
       {/* Home screen */}
