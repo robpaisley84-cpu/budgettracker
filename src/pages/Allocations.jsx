@@ -2,8 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, startOfDay } from 'date-fns'
-import { computeAccrual, isAutoAccrued } from '../lib/accrual'
-import { perCheckShare } from '../lib/projection'
+import { paydaysBetween } from '../lib/projection'
+import { planForCheck } from '../lib/funding'
+import { linesPerAccount, anchorsFor, spendSinceAnchor, allocatedSinceAnchor, fundBalance } from '../lib/funds'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -52,65 +53,77 @@ export default function Allocations() {
 
   useEffect(() => { if (household) load() }, [household])
 
+  // The engine needs to know what each envelope already holds, so this page
+  // loads the same ingredients Dashboard and Accounts do and runs them through
+  // src/lib/funds.js. Kept as raw parts (not just totals) so a paycheck being
+  // re-split can be excluded from "held" - otherwise its own allocations would
+  // make every bill look already funded.
+  const [ledger, setLedger] = useState(null)
+
   async function load() {
-    const [{ data: a }, { data: p }, { data: bi }] = await Promise.all([
-      supabase.from('accounts').select('id, name, icon, type, sort_order').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
+    const [{ data: a }, { data: p }, { data: bi }, { data: allocs }, { data: exp }, { data: firstTxn }] = await Promise.all([
+      // accounts_with_balance so sole-occupant fund lines read their real balance (014)
+      supabase.from('accounts_with_balance').select('id, name, icon, type, sort_order, balance').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('paychecks').select('*').eq('household_id', household.id).order('date', { ascending: false }).limit(6),
-      // Budget lines with the account each one lives in (014)
       supabase.from('budget_items')
-        .select('id, name, budgeted_amount, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, account_id, is_remainder_target, category:budget_categories(name, icon, sort_order)')
+        .select('id, name, budgeted_amount, per_check_amount, funding_mode, bill_amount, interval_months, due_day, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, account_id, is_remainder_target, account:accounts(id, name, type), category:budget_categories(name, icon, sort_order)')
         .eq('household_id', household.id).eq('is_active', true),
+      supabase.from('paycheck_allocations').select('budget_item_id, amount, date, paycheck_id').eq('household_id', household.id),
+      supabase.from('transactions').select('budget_item_id, budget_month, amount, date').eq('household_id', household.id).eq('type', 'expense'),
+      supabase.from('transactions').select('budget_month').eq('household_id', household.id).order('budget_month', { ascending: true }).limit(1),
     ])
+    const appStart = firstTxn?.[0]?.budget_month || format(new Date(), 'yyyy-MM')
+    const { itemAnchor, savedAsOf } = anchorsFor(bi, appStart)
+    const led = {
+      allocs: allocs || [],
+      spent: spendSinceAnchor(exp, itemAnchor, savedAsOf),
+      savedAsOf,
+      perAccount: linesPerAccount(bi),
+      accountBalance: Object.fromEntries((a || []).map(x => [x.id, +x.balance])),
+    }
     setAccounts(a || [])
     setPaychecks(p || [])
     setItems(bi || [])
+    setLedger(led)
     setLoading(false)
     // Returned as well as stored: payday needs to build a split from these the
     // moment they land, and the state setters above won't have applied yet.
-    return { accounts: a || [], paychecks: p || [], items: bi || [] }
+    return { accounts: a || [], paychecks: p || [], items: bi || [], ledger: led }
   }
 
   const checking = accounts.find(a => a.type === 'checking') || null
   const remainderLine = items.find(i => i.is_remainder_target) || null
 
-  function suggestedFor(item) {
-    const perMonth = isAutoAccrued(item)
-      ? (computeAccrual(item)?.accrual ?? +item.budgeted_amount)
-      : +item.budgeted_amount
-    return perCheckShare(perMonth, household?.pay_frequency)
+  // What every envelope holds, optionally ignoring one paycheck's own allocations.
+  function balancesFrom(itemsList, led, excludePaycheckId = null) {
+    if (!led) return {}
+    const allocated = allocatedSinceAnchor(
+      excludePaycheckId ? led.allocs.filter(x => x.paycheck_id !== excludePaycheckId) : led.allocs,
+      led.savedAsOf)
+    const out = {}
+    for (const it of itemsList) {
+      out[it.id] = fundBalance(it, {
+        allocated: allocated[it.id] || 0, spent: led.spent[it.id] || 0,
+        accountBalance: led.accountBalance, perAccount: led.perAccount,
+      })
+    }
+    return out
   }
 
-  // The plan applied to one paycheck: every line at its suggested share, and
-  // whatever is left lands in the remainder line so every dollar has a job.
-  // The remainder line's own suggestion is shown for reference only — it
-  // absorbs the leftover, plan or not.
-  function planRows(netAmount, already = {}, itemsList = items, checkingAcct = checking) {
-    const rows = itemsList.map(i => ({
-      id: i.id,
-      name: i.name,
-      icon: i.category?.icon || '📋',
-      catSort: i.category?.sort_order ?? 99,
-      suggested: suggestedFor(i),
-      accountId: i.account_id,
-      ownAccount: !!(i.account_id && checkingAcct && i.account_id !== checkingAcct.id),
-      isRemainder: !!i.is_remainder_target,
-      amount: '',
-    })).sort((a, b) => (a.isRemainder - b.isRemainder) || a.catSort - b.catSort || a.name.localeCompare(b.name))
-
-    const hasExisting = Object.keys(already).length > 0
-    let assigned = 0
-    for (const r of rows) {
-      if (r.isRemainder) continue
-      const v = hasExisting ? (already[r.id] ?? 0) : r.suggested
-      r.amount = String(v)
-      assigned += +v
-    }
-    const target = rows.find(r => r.isRemainder)
-    if (target) {
-      target.amount = hasExisting
-        ? String(already[target.id] ?? 0)
-        : String(Math.max(0, Math.round((netAmount - assigned) * 100) / 100))
-    }
+  // The plan for one paycheck, from the engine: each scheduled bill gets what it
+  // still needs by its due date split across the checks before then, each
+  // flexible line gets its allowance, and the leftover lands in the remainder
+  // line. `already` (an existing split) overrides the suggestions when present.
+  function planRows({ net, date, already = {}, itemsList = items, checkingAcct = checking, led = ledger, excludePaycheckId = null }) {
+    const rows = planForCheck(itemsList, {
+      payday: new Date(String(date).slice(0, 10) + 'T12:00'),
+      net,
+      balances: balancesFrom(itemsList, led, excludePaycheckId),
+      household,
+      checkingId: checkingAcct?.id || null,
+    })
+    if (Object.keys(already).length === 0) return rows
+    for (const r of rows) r.amount = String(already[r.id] ?? 0)
     return rows
   }
 
@@ -165,7 +178,7 @@ export default function Allocations() {
     savedRef.current = saved
     const already = {}
     Object.entries(saved).forEach(([id, e]) => { already[id] = e.amount })
-    setDistRows(planRows(+paycheck.net_amount, already))
+    setDistRows(planRows({ net: +paycheck.net_amount, date: paycheck.date, already, excludePaycheckId: paycheck.id }))
     setDistStatus('clean')
     setShowDistribute(true)
   }
@@ -388,7 +401,7 @@ export default function Allocations() {
     // setters above haven't applied yet — this writes real transfers.
     const fresh = await load()
     const freshChecking = fresh.accounts.find(a => a.type === 'checking') || checking
-    const rows = planRows(amt, {}, fresh.items, freshChecking)
+    const rows = planRows({ net: amt, date: day, itemsList: fresh.items, checkingAcct: freshChecking, led: fresh.ledger })
 
     // If the plan asks for more than the check brings in, do NOT write it. The
     // distribute sheet refuses to store a split that doesn't balance, and payday
@@ -431,9 +444,12 @@ export default function Allocations() {
     load()
   }
 
-  // Summary of the plan for one check
+  // What the NEXT check will do, from the engine and today's balances. This moves
+  // as bills get paid and envelopes fill - that's the point.
   const perCheck = +(household?.paycheck_amount || 4212)
-  const plannedOthers = items.filter(i => !i.is_remainder_target).reduce((s, i) => s + suggestedFor(i), 0)
+  const nextPayday = paydaysBetween(household, new Date(), new Date(Date.now() + 45 * 86400000))[0]?.date || new Date()
+  const nextPlan = ledger ? planRows({ net: perCheck, date: format(nextPayday, 'yyyy-MM-dd') }) : []
+  const plannedOthers = nextPlan.filter(r => !r.isRemainder).reduce((s, r) => s + (+r.amount || 0), 0)
   const plannedLeft = Math.round((perCheck - plannedOthers) * 100) / 100
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--muted)' }}>Loading…</div>
@@ -550,11 +566,12 @@ export default function Allocations() {
                         {r.isRemainder && <span style={{ fontSize: '0.56rem', color: 'var(--accent)' }}> · gets the leftover</span>}
                       </div>
                       {r.isRemainder ? (
-                        <div style={{ fontSize: '0.58rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>plan {fmt(r.suggested)} · fills from what's left</div>
+                        <div style={{ fontSize: '0.58rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>fills from what's left</div>
                       ) : (
-                        <button onClick={() => edit(r.id, String(r.suggested))}
-                          style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '0.58rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
-                          suggested {fmt(r.suggested)}
+                        // The engine's suggestion and, in plain words, why - tap to take it
+                        <button onClick={() => edit(r.id, String(r.suggested))} title="Use the suggested amount"
+                          style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '0.58rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', textAlign: 'left' }}>
+                          {fmt(r.suggested)} · {r.reason}
                         </button>
                       )}
                     </div>
@@ -570,7 +587,7 @@ export default function Allocations() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button onClick={() => { setDistRows(planRows(net)); scheduleSave() }}
+                <button onClick={() => { setDistRows(planRows({ net, date: distPaycheck.date, excludePaycheckId: distPaycheck.id })); scheduleSave() }}
                   style={{ flex: 1, background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.7rem', color: 'var(--muted)', fontSize: '0.8rem' }}>
                   Reset to plan
                 </button>

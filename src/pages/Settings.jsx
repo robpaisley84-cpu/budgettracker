@@ -19,6 +19,7 @@ export default function Settings() {
   const [payAmt, setPayAmt]     = useState(household?.paycheck_amount ?? '')
   const [freq, setFreq]         = useState(household?.pay_frequency || 'biweekly')
   const [anchor, setAnchor]     = useState(household?.pay_anchor_date || '')
+  const [floor, setFloor]       = useState(household?.checking_floor ?? '')
   const [saving, setSaving]     = useState(false)
   const [savedAt, setSavedAt]   = useState(false)
 
@@ -43,7 +44,8 @@ export default function Settings() {
     setPayAmt(household.paycheck_amount ?? '')
     setFreq(household.pay_frequency || 'biweekly')
     setAnchor(household.pay_anchor_date || '')
-  }, [household?.id, household?.paycheck_amount, household?.pay_frequency, household?.pay_anchor_date])
+    setFloor(household.checking_floor ?? '')
+  }, [household?.id, household?.paycheck_amount, household?.pay_frequency, household?.pay_anchor_date, household?.checking_floor])
 
   const perCheck = +payAmt || 0
   const cfg      = FREQ[freq] || FREQ.biweekly
@@ -54,7 +56,8 @@ export default function Settings() {
   const dirty =
     String(payAmt) !== String(household?.paycheck_amount ?? '') ||
     freq !== (household?.pay_frequency || 'biweekly') ||
-    (anchor || '') !== (household?.pay_anchor_date || '')
+    (anchor || '') !== (household?.pay_anchor_date || '') ||
+    String(floor) !== String(household?.checking_floor ?? '')
 
   async function saveIncome() {
     if (!payAmt && payAmt !== 0) return
@@ -65,6 +68,7 @@ export default function Settings() {
       pay_frequency: freq,
       pay_anchor_date: dated(freq) ? (anchor || null) : null,
       monthly_income: Math.round((annual / 12) * 100) / 100,  // annual average, for reference
+      checking_floor: +floor || 0,
     })
     setSaving(false)
     if (!error) { setSavedAt(true); setTimeout(() => setSavedAt(false), 2500) }
@@ -138,6 +142,18 @@ export default function Settings() {
             <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginBottom: '0.85rem' }}>Anchors the {cfg.label.toLowerCase()} cycle so each month counts its real paydays.</div>
           </>
         )}
+
+        {/* The line checking should never cross (015). The projection flags any day it would. */}
+        <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem' }}>Checking floor</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)' }}>$</span>
+          <input
+            type="number" inputMode="decimal" value={floor}
+            onChange={e => setFloor(e.target.value)} placeholder="500"
+            style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.55rem 0.7rem', color: 'var(--text)', fontSize: '0.95rem', fontFamily: 'var(--font-mono)', outline: 'none' }}
+          />
+        </div>
+        <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginBottom: '0.85rem' }}>The balance checking should never dip below. The projection on Accounts flags any day it would.</div>
 
         {/* Cash-flow preview */}
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.7rem', marginBottom: '0.85rem', display: 'grid', gap: '0.45rem' }}>

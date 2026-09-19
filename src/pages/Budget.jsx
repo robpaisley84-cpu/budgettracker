@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { isAutoAccrued, intervalLabel } from '../lib/accrual'
 import { format, addMonths, subMonths } from 'date-fns'
+import { isScheduled, nextDue, billAmount, perCheckToMonthly, monthlyToPerCheck } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -23,6 +23,7 @@ export default function Budget() {
   const [loading, setLoading]         = useState(true)
   const [editing, setEditing]         = useState(null)
   const [editVal, setEditVal]         = useState('')
+  const [editUnit, setEditUnit]       = useState('check')   // 'check' | 'month' — either is accepted (015)
   const [renaming, setRenaming]       = useState(null)
   const [renameVal, setRenameVal]     = useState('')
   const [confirmDel, setConfirmDel]   = useState(null)
@@ -81,10 +82,19 @@ export default function Budget() {
     setActuals(map)
   }
 
+  // A flexible line's allowance. Whichever unit was typed, both columns are
+  // written: per_check_amount is what the engine uses, budgeted_amount is the
+  // monthly equivalent everything else still reads (015).
   async function saveItemAmount(itemId) {
     if (!editVal && editVal !== '0') return
     setSaving(true)
-    await supabase.from('budget_items').update({ budgeted_amount: +editVal }).eq('id', itemId)
+    const freq = household?.pay_frequency
+    const perCheck = editUnit === 'month' ? monthlyToPerCheck(+editVal, freq) : Math.round(+editVal * 100) / 100
+    await supabase.from('budget_items').update({
+      funding_mode: 'flexible',
+      per_check_amount: perCheck,
+      budgeted_amount: perCheckToMonthly(perCheck, freq),
+    }).eq('id', itemId)
     setEditing(null)
     setEditVal('')
     setSaving(false)
@@ -106,13 +116,19 @@ export default function Budget() {
     if (!form.name || !showAddItem) return
     setSaving(true)
     const cat = categories.find(c => c.id === showAddItem)
+    // New lines start flexible with a per-check allowance; make one a scheduled
+    // bill on the Schedule page. Both amount columns written (015).
+    const perCheck = Math.round((+form.amount || 0) * 100) / 100
     await supabase.from('budget_items').insert({
       household_id: household.id,
       category_id: showAddItem,
       name: form.name,
-      budgeted_amount: +form.amount || 0,
+      funding_mode: 'flexible',
+      per_check_amount: perCheck,
+      budgeted_amount: perCheckToMonthly(perCheck, household?.pay_frequency),
       is_fixed: form.is_fixed || false,
       sort_order: (cat?.items?.length || 0) + 1,
+      account_id: accounts.find(a => a.type === 'checking')?.id || null,
     })
     setSaving(false)
     setShowAddItem(null)
@@ -280,9 +296,10 @@ export default function Budget() {
                     const spent = actuals[item.id] || 0
                     const left  = +item.budgeted_amount - spent
                     const isOver = spent > +item.budgeted_amount
-                    // Accruing bills own their own number — editing it here would
-                    // just get overwritten on the next recalc, so send them to Bills.
-                    const auto = isAutoAccrued(item)
+                    // A scheduled bill's numbers come from its schedule — edit those
+                    // on the Schedule page, not here (015).
+                    const auto = isScheduled(item)
+                    const due  = auto ? nextDue(item, new Date()) : null
                     const isEditing = editing === item.id && !auto
 
                     return (
@@ -305,27 +322,36 @@ export default function Budget() {
                               style={{ fontSize: '0.8rem', color: 'var(--text)', cursor: 'pointer' }}>{item.name}</div>
                           )}
                           <div style={{ fontSize: '0.63rem', color: 'var(--muted)' }}>
-                            Budget: {isEditing ? (
+                            {isEditing ? (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                                 <span style={{ fontFamily: 'var(--font-mono)' }}>$</span>
                                 <input
-                                  type="number"
+                                  type="number" step="0.01"
                                   value={editVal}
                                   onChange={e => setEditVal(e.target.value)}
                                   onKeyDown={e => { if (e.key === 'Enter') saveItemAmount(item.id); if (e.key === 'Escape') setEditing(null) }}
                                   autoFocus
                                   style={{ width: '70px', background: 'var(--bg)', border: '1px solid var(--accent)', borderRadius: '4px', padding: '0.15rem 0.3rem', color: 'var(--accentL)', fontSize: '0.65rem', fontFamily: 'var(--font-mono)', outline: 'none' }}
                                 />
+                                {/* Type in either unit — the other is derived on save */}
+                                <button onClick={() => setEditUnit(u => u === 'check' ? 'month' : 'check')} title="Switch between per check and per month"
+                                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>
+                                  /{editUnit === 'check' ? 'check' : 'mo'}
+                                </button>
                                 <button onClick={() => saveItemAmount(item.id)} style={{ background: 'var(--green)', border: 'none', borderRadius: '3px', color: 'var(--onAccent)', fontSize: '0.55rem', padding: '0.1rem 0.3rem', fontWeight: 700 }}>✓</button>
                                 <button onClick={() => setEditing(null)} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '3px', color: 'var(--muted)', fontSize: '0.55rem', padding: '0.1rem 0.3rem' }}>✕</button>
                               </span>
                             ) : auto ? (
-                              <Link to="/bills" style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)', textDecoration: 'none' }} title={`Auto-accrued from a ${intervalLabel(item.interval_months).toLowerCase()} bill of ${fmt(item.bill_amount)} — edit it on the Bills page`}>
-                                {fmt(item.budgeted_amount)} <span style={{ fontSize: '0.6rem', color: 'var(--accent)' }}>🔄 auto</span>
+                              <Link to="/bills" style={{ fontFamily: 'var(--font-mono)', color: 'var(--muted)', textDecoration: 'none' }} title="A scheduled bill — change its amount or date on the Schedule page">
+                                {fmt(billAmount(item))}{due && <> on the {format(due, 'do')}</>} <span style={{ fontSize: '0.6rem', color: 'var(--accent)' }}>📅</span>
                               </Link>
                             ) : (
-                              <span onClick={() => { setEditing(item.id); setEditVal(item.budgeted_amount) }} style={{ fontFamily: 'var(--font-mono)', cursor: 'pointer', borderBottom: '1px dashed var(--muted)' }}>{fmt(item.budgeted_amount)}</span>
+                              <span onClick={() => { setEditing(item.id); setEditUnit('check'); setEditVal(item.per_check_amount ?? monthlyToPerCheck(item.budgeted_amount, household?.pay_frequency)) }}
+                                style={{ fontFamily: 'var(--font-mono)', cursor: 'pointer', borderBottom: '1px dashed var(--muted)' }}>
+                                {fmt(item.per_check_amount ?? monthlyToPerCheck(item.budgeted_amount, household?.pay_frequency))}/check
+                              </span>
                             )}
+                            {!isEditing && !auto && <span style={{ fontFamily: 'var(--font-mono)', marginLeft: '0.35rem', opacity: 0.7 }}>{fmt(item.budgeted_amount)}/mo</span>}
                             {/* Shown even at zero spend — "what's left" is most
                                 useful at the start of a month, before anything
                                 has been logged against the line. */}
@@ -389,7 +415,7 @@ export default function Budget() {
             <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '1rem' }}>New Budget Line Item</div>
             {[
               { l: 'Item Name', k: 'name', p: 'e.g. New Expense' },
-              { l: 'Monthly Budget', k: 'amount', p: '0', type: 'number' },
+              { l: 'Allowance per check', k: 'amount', p: '0', type: 'number' },
             ].map(f => (
               <div key={f.k} style={{ marginBottom: '0.75rem' }}>
                 <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{f.l}</label>

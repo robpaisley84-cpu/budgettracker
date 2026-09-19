@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, endOfMonth, addDays, parseISO, differenceInCalendarDays, differenceInCalendarMonths } from 'date-fns'
-import { computeAccrual, isAutoAccrued } from '../lib/accrual'
+import { computeAccrual } from '../lib/accrual'
 import { linesPerAccount, isSoleOccupant, anchorsFor, spendSinceAnchor, allocatedSinceAnchor, fundBalance } from '../lib/funds'
-import { CHECKS_PER_YEAR } from '../lib/projection'
+import { CHECKS_PER_YEAR, paydaysBetween } from '../lib/projection'
+import { isScheduled, safeToSpend, nextDue, billAmount } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -75,7 +76,7 @@ export default function Dashboard() {
       supabase.from('accounts_with_balance').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       // accounts must be embedded via account_id — transactions also has to_account_id
       supabase.from('transactions').select('*, budget_item:budget_items(name), account:accounts!account_id(name)').eq('household_id', household.id).eq('budget_month', month).order('created_at', { ascending: false }).limit(8),
-      supabase.from('budget_items').select('id, name, budgeted_amount, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, account_id, is_remainder_target, account:accounts(id, name, icon, type), category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
+      supabase.from('budget_items').select('id, name, budgeted_amount, funding_mode, per_check_amount, due_day, is_pinned, fund_sort_order, bill_amount, interval_months, last_paid_date, next_due_date, auto_accrue, saved_so_far, saved_as_of, tier, account_id, is_remainder_target, account:accounts(id, name, icon, type), category:budget_categories(name, icon, color)').eq('household_id', household.id).eq('is_active', true),
       // Oldest transaction = when this household started budgeting. Envelope
       // funds accrue from here, not from January, so a mid-year start does not
       // claim months of funding that never happened.
@@ -177,6 +178,11 @@ export default function Dashboard() {
       const soleOwn    = isSoleOccupant(item, perAccount)            // ...and nothing else shares it
       const balance    = fundBalance(item, { allocated: putIn, spent, accountBalance, perAccount })
 
+      // Hayley's number (015): a flexible line's balance is spendable; a
+      // scheduled bill's is reserved, so only a surplus over the bill counts.
+      const scheduled = isScheduled(item)
+      const due       = scheduled ? nextDue(item, new Date()) : null
+
       return {
         backedBy: backing?.name || null,
         backingAccountId: backing?.id || null,
@@ -185,6 +191,11 @@ export default function Dashboard() {
         isRemainderTarget: !!item.is_remainder_target,
         id: item.id,
         name: item.name,
+        scheduled,
+        safe: safeToSpend(item, balance),
+        bill: scheduled ? billAmount(item) : null,
+        dueNext: due,
+        perCheck: +item.per_check_amount || 0,
         monthlyBudget,
         totalAllocated,
         spent,
@@ -332,9 +343,6 @@ export default function Dashboard() {
 
   const visibleFunds = showAll ? funds : funds.slice(0, 12)
 
-  // Total envelope balance
-  const totalFundBalance = funds.reduce((s, f) => s + f.fundBalance, 0)
-
   function openTrueUp(f) {
     setTrueUp(f)
     setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
@@ -429,6 +437,108 @@ export default function Dashboard() {
           <button onClick={() => setViewMonth(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>›</button>
         </div>
       </div>
+
+      {/* Safe to spend — the front page is the envelopes, not the month (015).
+          One number per fund, right now. Scheduled bills show as reserved. */}
+      {(() => {
+        const totalSafe   = funds.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
+        const overspent   = funds.filter(f => !f.scheduled && f.safe < 0).reduce((s, f) => s + f.safe, 0)
+        const nextPay     = paydaysBetween(household, new Date(), addDays(new Date(), 45))[0]?.date
+        const daysToPay   = nextPay ? differenceInCalendarDays(nextPay, new Date()) : null
+        return (
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
+              <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Safe to spend</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button onClick={() => setEditFunds(!editFunds)} style={{ background: editFunds ? 'var(--accent)' : 'transparent', border: `1px solid ${editFunds ? 'var(--accent)' : 'var(--border)'}`, color: editFunds ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '5px', padding: '0.2rem 0.45rem', fontSize: '0.62rem', cursor: 'pointer', fontWeight: editFunds ? 700 : 400 }}>
+                  {editFunds ? 'Done' : 'Reorder'}
+                </button>
+                <Link to="/bills" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Schedule →</Link>
+              </div>
+            </div>
+
+            {/* Headline: what's spendable across every fund, and when the next check lands */}
+            <div style={{ background: 'var(--card)', border: '1px solid var(--accent)', borderRadius: 'var(--radius) var(--radius) 0 0', padding: '0.85rem 0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--accentL)', lineHeight: 1 }}>{fmt(totalSafe)}</div>
+                <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
+                  across all funds{overspent < 0 && <> · <span style={{ color: 'var(--red)' }}>{fmt(overspent)} overspent</span></>}
+                </div>
+              </div>
+              {nextPay && (
+                <div style={{ textAlign: 'right', fontSize: '0.66rem', color: 'var(--muted)', lineHeight: 1.45 }}>
+                  next check {format(nextPay, 'EEE MMM d')}<br />
+                  <span style={{ color: 'var(--text)' }}>{daysToPay === 0 ? 'today' : `in ${daysToPay} day${daysToPay === 1 ? '' : 's'}`}</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 var(--radius) var(--radius)', overflow: 'hidden' }}>
+              {visibleFunds.length === 0 && (
+                <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
+                  No budget items yet — <Link to="/budget" style={{ color: 'var(--accent)' }}>set up your budget</Link>
+                </div>
+              )}
+              {visibleFunds.map((f, i) => {
+                const safeColor = f.safe < 0 ? 'var(--red)' : f.safe === 0 ? 'var(--muted)' : f.safe < f.perCheck * 0.35 ? 'var(--amber)' : 'var(--green)'
+                const pct = f.scheduled && f.bill > 0 ? Math.min(100, Math.max(0, (f.fundBalance / f.bill) * 100)) : null
+                return (
+                  <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'var(--pinned)' : 'transparent' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {editFunds && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                          <button onClick={() => moveFund(f.id, 'up')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▲</button>
+                          <button onClick={() => moveFund(f.id, 'down')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▼</button>
+                        </div>
+                      )}
+                      <button onClick={() => togglePin(f.id, f.isPinned)} style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', padding: 0, cursor: 'pointer', opacity: f.isPinned ? 1 : 0.35 }} title={f.isPinned ? 'Unpin' : 'Pin to top'}>
+                        {f.isPinned ? '⭐' : '☆'}
+                      </button>
+                      <div style={{ flex: 1, minWidth: 0 }}
+                        onClick={() => { if (!editFunds) openTrueUp(f) }}
+                        role={!editFunds ? 'button' : undefined}
+                        title={!editFunds ? (f.soleOwn ? 'Move money' : 'Set the real balance or move money') : undefined}>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds ? 'pointer' : 'default' }}>
+                          {f.name}
+                          {f.trued && !f.soleOwn && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
+                          {f.isRemainderTarget && <span style={{ color: 'var(--accent)', fontSize: '0.58rem' }} title="Receives each paycheck's leftover"> ⤵</span>}
+                        </div>
+                        <div style={{ fontSize: '0.56rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+                          {f.scheduled
+                            ? <>reserved · {fmt(f.fundBalance)} of {fmt(f.bill)}{f.dueNext && <> · due {format(f.dueNext, 'MMM d')}</>}</>
+                            : <>{fmt(f.perCheck)}/check{f.thisMonthSpent > 0 && <> · {fmt(f.thisMonthSpent)} spent this mo</>}</>}
+                          {f.ownAccount && <> · 🏦 {f.backedBy}</>}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: safeColor }}>
+                          {f.safe < 0 ? '-' : ''}{fmt(f.safe)}
+                        </div>
+                        {f.scheduled && f.safe === 0 && <div style={{ fontSize: '0.52rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>reserved</div>}
+                      </div>
+                    </div>
+                    {pct !== null && (
+                      <div style={{ marginTop: '0.3rem', marginLeft: editFunds ? '1.1rem' : '1.65rem', background: 'var(--border)', borderRadius: '3px', height: '3px', overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: pct >= 100 ? 'var(--green)' : 'var(--accent)', borderRadius: '3px', transition: 'width 0.3s' }} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {visibleFunds.length > 0 && !editFunds && (
+                <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', padding: '0.45rem', borderTop: '1px solid var(--border)' }}>
+                  Tap a fund to set what it really holds, or move money between funds
+                </div>
+              )}
+              {funds.length > 12 && (
+                <button onClick={() => setShowAll(!showAll)} style={{ width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--accent)', fontSize: '0.72rem', padding: '0.6rem', cursor: 'pointer' }}>
+                  {showAll ? 'Show less' : `Show all ${funds.length} funds`}
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Key metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1rem' }}>
@@ -737,85 +847,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      {/* Funds Available — envelope balances */}
-      <div style={{ marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-          <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Funds Available</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: totalFundBalance >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-              {totalFundBalance < 0 ? '-' : ''}{fmt(totalFundBalance)}
-            </span>
-            <button onClick={() => setEditFunds(!editFunds)} style={{ background: editFunds ? 'var(--accent)' : 'transparent', border: `1px solid ${editFunds ? 'var(--accent)' : 'var(--border)'}`, color: editFunds ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '5px', padding: '0.2rem 0.45rem', fontSize: '0.62rem', cursor: 'pointer', fontWeight: editFunds ? 700 : 400 }}>
-              {editFunds ? 'Done' : 'Reorder'}
-            </button>
-            <Link to="/budget" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Edit →</Link>
-          </div>
-        </div>
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-          {visibleFunds.length === 0 && (
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
-              No budget items yet — <Link to="/budget" style={{ color: 'var(--accent)' }}>set up your budget</Link>
-            </div>
-          )}
-          {visibleFunds.map((f, i) => {
-            const pct = f.totalAllocated > 0 ? Math.min((f.spent / f.totalAllocated) * 100, 100) : 0
-            const balColor = f.fundBalance <= 0 ? 'var(--red)' : f.fundBalance < f.monthlyBudget * 0.5 ? 'var(--amber)' : 'var(--green)'
-            return (
-              <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'var(--pinned)' : 'transparent' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                  {editFunds && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                      <button onClick={() => moveFund(f.id, 'up')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▲</button>
-                      <button onClick={() => moveFund(f.id, 'down')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▼</button>
-                    </div>
-                  )}
-                  <button onClick={() => togglePin(f.id, f.isPinned)} style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', padding: 0, cursor: 'pointer', opacity: f.isPinned ? 1 : 0.35 }} title={f.isPinned ? 'Unpin' : 'Pin to top'}>
-                    {f.isPinned ? '⭐' : '☆'}
-                  </button>
-                  <div style={{ flex: 1, minWidth: 0 }}
-                    onClick={() => { if (!editFunds) openTrueUp(f) }}
-                    role={!editFunds ? 'button' : undefined}
-                    title={!editFunds ? (f.soleOwn ? 'Move money' : 'Set the real balance or move money') : undefined}>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds ? 'pointer' : 'default' }}>
-                      {f.name}
-                      {f.trued && !f.soleOwn && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
-                      {f.isRemainderTarget && <span style={{ color: 'var(--accent)', fontSize: '0.58rem' }} title="Receives each paycheck's leftover"> ⤵</span>}
-                    </div>
-                    {f.ownAccount && (
-                      <div style={{ fontSize: '0.56rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        🏦 {f.backedBy}{f.soleOwn ? ' — this is the account balance' : ' — shared, assign on Accounts'}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: balColor }}>
-                    {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: editFunds ? '1.1rem' : '1.65rem' }}>
-                  <div style={{ flex: 1, background: 'var(--border)', borderRadius: '3px', height: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: balColor, borderRadius: '3px', transition: 'width 0.3s' }} />
-                  </div>
-                  <div style={{ fontSize: '0.55rem', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
-                    {fmt(f.spent)} spent / {fmt(f.totalAllocated)} alloc
-                    {f.thisMonthSpent > 0 && <span style={{ color: 'var(--accentL)' }}> · {fmt(f.thisMonthSpent)} this mo</span>}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-          {visibleFunds.length > 0 && !editFunds && (
-            <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', padding: '0.45rem', borderTop: '1px solid var(--border)' }}>
-              Tap a fund name to set what it really holds
-            </div>
-          )}
-          {funds.length > 12 && (
-            <button onClick={() => setShowAll(!showAll)} style={{ width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--accent)', fontSize: '0.72rem', padding: '0.6rem', cursor: 'pointer' }}>
-              {showAll ? 'Show less' : `Show all ${funds.length} items`}
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Account balances */}
       <div style={{ marginBottom: '1rem' }}>

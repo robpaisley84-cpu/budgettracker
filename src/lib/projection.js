@@ -8,7 +8,7 @@
 // Pure functions: no Supabase, no React.
 
 import { addDays, addMonths, parseISO, startOfDay, startOfMonth, setDate, getDaysInMonth, isBefore, isAfter, format } from 'date-fns'
-import { computeAccrual } from './accrual'
+import { computeAccrual } from './accrual.js'
 
 const round2 = (n) => Math.round(n * 100) / 100
 const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd')
@@ -132,6 +132,9 @@ export function projectDaily({ startBalance, from, days = 90, paydays = [], bill
   let balance = +startBalance || 0
   const points = []
   let totalIn = 0, totalOut = 0
+  // What leaves for savings can differ per check now that bills are funded to
+  // their due dates, so accept a function of the payday as well as a number.
+  const toSavings = typeof perPaydayToSavings === 'function' ? perPaydayToSavings : () => (+perPaydayToSavings || 0)
 
   for (let i = 0; i <= days; i++) {
     const date = addDays(start, i)
@@ -141,7 +144,7 @@ export function projectDaily({ startBalance, from, days = 90, paydays = [], bill
     if (i > 0) {
       for (const p of paydays) if (sameDay(p.date, date)) {
         income += p.amount
-        charges += perPaydayToSavings
+        charges += toSavings(p.date)
       }
       for (const b of bills) if (sameDay(b.date, date)) charges += b.amount
       charges += dailySpend

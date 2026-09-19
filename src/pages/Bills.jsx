@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { computeAccrual, pendingSyncs, intervalLabel, dueFromLastPaid, isAutoAccrued } from '../lib/accrual'
+import { computeAccrual, pendingSyncs, intervalLabel, dueFromLastPaid } from '../lib/accrual'
+import { isScheduled, perCheckToMonthly, monthlyToPerCheck } from '../lib/funding'
 import { format, parseISO, startOfMonth, endOfMonth, addDays, getDate, getDaysInMonth } from 'date-fns'
 
 const fmt  = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
@@ -53,7 +54,7 @@ export default function Bills() {
     setLoading(true)
     const { data } = await supabase
       .from('budget_items')
-      .select('id, name, budgeted_amount, due_day, bill_frequency, next_due_date, bill_amount, interval_months, last_paid_date, auto_accrue, saved_so_far, saved_as_of, category:budget_categories(icon, color)')
+      .select('id, name, budgeted_amount, funding_mode, per_check_amount, due_day, bill_frequency, next_due_date, bill_amount, interval_months, last_paid_date, auto_accrue, saved_so_far, saved_as_of, category:budget_categories(icon, color)')
       .eq('household_id', household.id)
       .eq('is_active', true)
 
@@ -76,16 +77,28 @@ export default function Bills() {
     setEdit(item)
     const interval = item.interval_months ?? (item.bill_frequency === 'quarterly' ? 3 : item.bill_frequency === 'annual' ? 12 : item.bill_frequency === 'monthly' ? 1 : '')
     const c = computeAccrual(item, today)  // pre-fill "set aside" with the current projected balance
+    const freq = household?.pay_frequency
     setForm({
-      interval,
+      // Which kind of line this is (015). Unset counts as flexible.
+      mode:     isScheduled(item) ? 'scheduled' : 'flexible',
+      // Flexible: the allowance, in both units - editing either derives the other
+      perCheck: item.per_check_amount ?? (item.budgeted_amount ? String(monthlyToPerCheck(item.budgeted_amount, freq)) : ''),
+      perMonth: item.per_check_amount != null ? String(perCheckToMonthly(item.per_check_amount, freq)) : (item.budgeted_amount ?? ''),
+      // Scheduled: the schedule. A monthly bill's charge used to hide in
+      // budgeted_amount; now it's bill_amount like every other bill.
+      interval: interval === '' ? 1 : interval,
       custom:   interval !== '' && !PRESETS.some(p => p.n === +interval),
-      amount:   item.bill_amount ?? '',
+      amount:   item.bill_amount ?? (+interval === 1 ? item.budgeted_amount : '') ?? '',
       dueDay:   item.due_day || '',
       lastPaid: item.last_paid_date || '',
       nextDue:  item.next_due_date || '',
       saved:    item.saved_so_far != null ? String(item.saved_so_far) : (c ? String(c.accrued) : ''),
     })
   }
+
+  // Keep the two allowance units in step
+  function setPerCheck(v)  { setForm(f => ({ ...f, perCheck: v, perMonth: v === '' ? '' : String(perCheckToMonthly(+v, household?.pay_frequency)) })) }
+  function setPerMonth(v)  { setForm(f => ({ ...f, perMonth: v, perCheck: v === '' ? '' : String(monthlyToPerCheck(+v, household?.pay_frequency)) })) }
 
   // Keep next-due in step with last-paid + interval unless it's been set by hand
   function setInterval(n) {
@@ -104,7 +117,24 @@ export default function Bills() {
     if (!edit) return
     setSaving(true)
 
-    const n = +form.interval || null
+    // A flexible allowance has no schedule. Switching a bill to flexible clears
+    // its dates on purpose - the toggle is the deliberate act, and a stale due
+    // day left behind would make it show up as a bill anyway.
+    if (form.mode === 'flexible') {
+      const perCheck = +form.perCheck || 0
+      await supabase.from('budget_items').update({
+        funding_mode:     'flexible',
+        per_check_amount: perCheck,
+        budgeted_amount:  perCheckToMonthly(perCheck, household?.pay_frequency),  // kept in sync (015)
+        interval_months:  null, bill_frequency: null, due_day: null,
+        bill_amount:      null, last_paid_date: null, next_due_date: null,
+        auto_accrue:      false,
+      }).eq('id', edit.id)
+      setSaving(false); setEdit(null); setForm({}); load()
+      return
+    }
+
+    const n = +form.interval || 1
     const periodic = n > 1
     const lastPaid = markPaidToday ? todayISO() : (form.lastPaid || null)
     const nextDue  = periodic
@@ -112,25 +142,28 @@ export default function Bills() {
       : null
 
     const savedSoFar = periodic && form.saved !== '' && form.saved != null ? +form.saved : null
+    const amount = +form.amount || null
 
     const patch = {
-      interval_months: n,
-      bill_frequency:  n === 1 ? 'monthly' : n === 3 ? 'quarterly' : n === 12 ? 'annual' : n ? 'periodic' : null,
-      due_day:         n === 1 ? (+form.dueDay || null) : null,
-      bill_amount:     periodic ? (+form.amount || null) : null,
-      last_paid_date:  periodic ? lastPaid : null,
-      next_due_date:   nextDue,
-      auto_accrue:     !!(periodic && +form.amount > 0),
+      funding_mode:     'scheduled',
+      per_check_amount: null,                     // the engine derives it from the schedule
+      interval_months:  n,
+      bill_frequency:   n === 1 ? 'monthly' : n === 3 ? 'quarterly' : n === 12 ? 'annual' : 'periodic',
+      due_day:          n === 1 ? (+form.dueDay || null) : null,
+      bill_amount:      amount,                   // the real charge, monthly bills included
+      last_paid_date:   periodic ? lastPaid : null,
+      next_due_date:    nextDue,
+      auto_accrue:      !!(periodic && amount > 0),
       // Paying resets the fund to 0 as of today; otherwise anchor the entered
       // balance to today so the catch-up prorates from now.
-      saved_so_far:    markPaidToday ? 0 : savedSoFar,
-      saved_as_of:     markPaidToday ? lastPaid : (savedSoFar != null ? todayISO() : null),
+      saved_so_far:     markPaidToday ? 0 : savedSoFar,
+      saved_as_of:      markPaidToday ? lastPaid : (savedSoFar != null ? todayISO() : null),
     }
 
-    // Write the computed accrual straight into budgeted_amount so the rest of
-    // the app sees the new number without waiting for a reload.
+    // budgeted_amount stays the monthly equivalent (015): the charge itself for a
+    // monthly bill, the computed accrual for a longer cycle.
     const calc = computeAccrual({ ...edit, ...patch })
-    if (calc) patch.budgeted_amount = calc.accrual
+    patch.budgeted_amount = calc ? calc.accrual : (amount || 0)
 
     await supabase.from('budget_items').update(patch).eq('id', edit.id)
     setSaving(false); setEdit(null); setForm({}); load()
@@ -138,19 +171,26 @@ export default function Bills() {
 
   const paydays = paydayDays(household?.pay_frequency || 'biweekly', household?.pay_anchor_date, today, household?.paycheck_day_1, household?.paycheck_day_2)
 
-  const monthly = items.filter(i => (i.interval_months === 1 || (!i.interval_months && i.bill_frequency === 'monthly')) && i.due_day)
+  const scheduled = items.filter(isScheduled)
+  const monthly   = scheduled.filter(i => (+i.interval_months || 1) === 1 && i.due_day)
 
-  const periodic = items
+  const periodic = scheduled
     .map(i => ({ item: i, calc: computeAccrual(i, today) }))
     .filter(x => x.calc)
     .sort((a, b) => a.calc.daysUntil - b.calc.daysUntil)
 
-  const unscheduled = items.filter(i => {
-    const n = i.interval_months
-    if (!n && !i.bill_frequency) return true
-    if (n === 1 || i.bill_frequency === 'monthly') return !i.due_day
-    return !isAutoAccrued(i) || !computeAccrual(i, today)
+  // Scheduled, but the engine can't act on it yet: no due day, or no amount.
+  const needsSetup = scheduled.filter(i => {
+    const n = +i.interval_months || 1
+    if (!(+i.bill_amount > 0)) return true
+    if (n === 1) return !i.due_day
+    return !computeAccrual(i, today)
   })
+
+  // Flexible allowances - a deliberate choice, but worth a glance: anything here
+  // that is really a bill with a date should be switched over.
+  const flexible = items.filter(i => !isScheduled(i)).sort((a, b) => (+b.per_check_amount || 0) - (+a.per_check_amount || 0))
+  const flexibleTotal = flexible.reduce((s, i) => s + (+i.per_check_amount || 0), 0)
 
   // Merge monthly bills + paydays into one day-ordered timeline
   const timeline = [
@@ -243,30 +283,87 @@ export default function Bills() {
         })}
       </div>
 
-      {/* Unscheduled */}
-      {unscheduled.length > 0 && (
+      {/* Scheduled, but missing something the engine needs */}
+      {needsSetup.length > 0 && (
         <>
-          <h2 style={h2}>Not scheduled yet</h2>
-          <div style={{ ...section, marginBottom: 0 }}>
-            {unscheduled.map((item, idx) => (
-              <div key={item.id} onClick={() => openEdit(item)} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.9rem', cursor: 'pointer', borderBottom: idx < unscheduled.length-1 ? '1px solid var(--hairline)' : 'none' }}>
+          <h2 style={h2}>Bills that need a date or an amount</h2>
+          <div style={section}>
+            {needsSetup.map((item, idx) => (
+              <div key={item.id} onClick={() => openEdit(item)} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.9rem', cursor: 'pointer', borderBottom: idx < needsSetup.length-1 ? '1px solid var(--hairline)' : 'none' }}>
                 <span style={{ fontSize: '0.9rem' }}>{item.category?.icon || '📄'}</span>
-                <span style={{ flex: 1, fontSize: '0.84rem', color: 'var(--muted)' }}>{item.name}</span>
-                <span style={{ fontSize: '0.68rem', color: 'var(--accent)' }}>set up →</span>
+                <span style={{ flex: 1, fontSize: '0.84rem', color: 'var(--text)' }}>{item.name}</span>
+                <span style={{ fontSize: '0.68rem', color: 'var(--amber)' }}>{!(+item.bill_amount > 0) ? 'no amount' : 'no due date'} →</span>
               </div>
             ))}
           </div>
         </>
       )}
 
+      {/* Flexible allowances. Each is a deliberate "no due date" - but anything
+          in here that is really a bill should be switched to Scheduled. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
+        <h2 style={{ ...h2, margin: 0 }}>Flexible allowances — per check</h2>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--accentL)' }}>{fmt(flexibleTotal)}/check</span>
+      </div>
+      <div style={{ ...section, marginBottom: 0 }}>
+        {flexible.length === 0 && <div style={empty}>Every line has a schedule.</div>}
+        {flexible.map((item, idx) => (
+          <div key={item.id} onClick={() => openEdit(item)} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0.9rem', cursor: 'pointer', borderBottom: idx < flexible.length-1 ? '1px solid var(--hairline)' : 'none' }}>
+            <span style={{ fontSize: '0.9rem' }}>{item.category?.icon || '📄'}</span>
+            <span style={{ flex: 1, fontSize: '0.84rem', color: 'var(--text)' }}>{item.name}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--accentL)' }}>{fmt(item.per_check_amount)}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--muted)', minWidth: '4.2rem', textAlign: 'right' }}>{fmt(item.budgeted_amount)}/mo</span>
+          </div>
+        ))}
+      </div>
+
       {/* Edit sheet */}
       {edit && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50, overflowY: 'auto' }}
           onClick={e => { if (e.target === e.currentTarget) setEdit(null) }}>
           <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>Bill timing</div>
-            <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '1rem' }}>{edit.name}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>How this line is funded</div>
+            <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.85rem' }}>{edit.name}</div>
 
+            {/* The one choice that decides everything else (015) */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginBottom: '0.5rem' }}>
+              {[
+                { k: 'flexible',  l: 'Flexible allowance', hint: 'a set amount each check · spend it freely' },
+                { k: 'scheduled', l: 'Scheduled bill',     hint: 'an amount and a due date · reserved' },
+              ].map(o => {
+                const on = form.mode === o.k
+                return (
+                  <button key={o.k} onClick={() => setForm(f => ({ ...f, mode: o.k }))}
+                    style={{ background: on ? 'var(--accent)' : 'transparent', border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`, color: on ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '7px', padding: '0.5rem 0.55rem', textAlign: 'left' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: on ? 700 : 400 }}>{o.l}</div>
+                    <div style={{ fontSize: '0.56rem', opacity: 0.85, marginTop: '0.1rem', lineHeight: 1.3 }}>{o.hint}</div>
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginBottom: '1rem', lineHeight: 1.45 }}>
+              {form.mode === 'flexible'
+                ? 'Safe to spend is whatever the envelope holds. Switching a bill to this clears its due date.'
+                : 'Each check puts in what’s still needed by the due date, split across the checks before it. Safe to spend is $0 until it’s paid.'}
+            </div>
+
+            {form.mode === 'flexible' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+                <div>
+                  <label style={label}>Per check</label>
+                  <input type="number" step="0.01" value={form.perCheck} onChange={e => setPerCheck(e.target.value)} placeholder="0.00" style={input} autoFocus />
+                </div>
+                <div>
+                  <label style={label}>Per month (derived)</label>
+                  <input type="number" step="0.01" value={form.perMonth} onChange={e => setPerMonth(e.target.value)} placeholder="0.00" style={input} />
+                </div>
+                <div style={{ gridColumn: '1 / -1', fontSize: '0.6rem', color: 'var(--muted)', lineHeight: 1.45 }}>
+                  Type in either box — the other follows. Bi-weekly pay is 26 checks a year, so a month is 2.17 checks, not 2.
+                </div>
+              </div>
+            )}
+
+            {form.mode === 'scheduled' && (<>
             <label style={label}>How often</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginBottom: '0.5rem' }}>
               {PRESETS.map(p => {
@@ -288,16 +385,18 @@ export default function Bills() {
                 <input type="number" min="1" value={form.interval} onChange={e => setForm(f => ({ ...f, interval: e.target.value, nextDue: f.lastPaid && +e.target.value > 1 ? dueFromLastPaid(f.lastPaid, e.target.value) : f.nextDue }))}
                   placeholder="18" style={{ ...input, width: '5.5rem', padding: '0.5rem' }} />
               )}
-              <button onClick={() => setForm(f => ({ ...f, interval: '', custom: false }))}
-                style={{ flex: 1, background: 'transparent', border: `1px solid ${form.interval === '' ? 'var(--accent)' : 'var(--border)'}`, color: form.interval === '' ? 'var(--accent)' : 'var(--muted)', borderRadius: '7px', padding: '0.5rem', fontSize: '0.78rem' }}>
-                Variable / none
-              </button>
             </div>
 
             {+form.interval === 1 && (
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={label}>Due day of month (1–31)</label>
-                <input type="number" min="1" max="31" value={form.dueDay} onChange={e => setForm(f => ({ ...f, dueDay: e.target.value }))} placeholder="e.g. 15" style={input} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+                <div>
+                  <label style={label}>Amount each month</label>
+                  <input type="number" step="0.01" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="835.77" style={input} />
+                </div>
+                <div>
+                  <label style={label}>Due day (1–31)</label>
+                  <input type="number" min="1" max="31" value={form.dueDay} onChange={e => setForm(f => ({ ...f, dueDay: e.target.value }))} placeholder="15" style={input} />
+                </div>
               </div>
             )}
 
@@ -348,6 +447,7 @@ export default function Bills() {
                 </button>
               </>
             )}
+            </>)}
 
             <button onClick={() => save(false)} disabled={saving} style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
               {saving ? 'Saving…' : 'Save'}

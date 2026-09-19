@@ -265,7 +265,7 @@ export default function Accounts() {
       </div>
 
       {/* Where checking is headed, from the bills and paydays already scheduled */}
-      <BalanceProjection household={household} checking={checking} items={items} startBalance={+checking?.balance || 0} />
+      <BalanceProjection household={household} checking={checking} items={items} balances={balances} startBalance={+checking?.balance || 0} />
 
       {/* Account cards */}
       <div style={{ display: 'grid', gap: '0.6rem' }}>

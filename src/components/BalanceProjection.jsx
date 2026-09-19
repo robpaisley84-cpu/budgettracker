@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { format, addDays, startOfDay } from 'date-fns'
-import { paydaysBetween, billsBetween, projectDaily, perCheckShare } from '../lib/projection'
+import { paydaysBetween, billsBetween, projectDaily } from '../lib/projection'
+import { shareFor, isScheduled } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 const signed = (n) => (n < 0 ? '-' : '') + fmt(n)
@@ -19,7 +20,7 @@ const RANGES = [
  *
  * Everything is derived from the schedule already in the app. Nothing is written.
  */
-export default function BalanceProjection({ household, checking, items, startBalance }) {
+export default function BalanceProjection({ household, checking, items, startBalance, balances = {} }) {
   const [days, setDays]   = useState(60)
   const [hover, setHover] = useState(null)
   const [showTable, setShowTable] = useState(false)
@@ -39,30 +40,36 @@ export default function BalanceProjection({ household, checking, items, startBal
     // real transfer — and the Exit Fund takes the whole leftover, not a planned
     // share, so if it lives in its own account that leftover leaves too. Miss
     // that and the projection is optimistic by most of a paycheck.
+    //
+    // Shares come from the engine (015), so a bill due soon takes more of the
+    // next check and less of later ones. Held balances are today's - a first
+    // approximation, since walking each envelope forward is Session B.
     const inChecking = (i) => (i.account_id || i.account?.id) === checkingId
     const net        = +household?.paycheck_amount || 0
     const others     = (items || []).filter(i => !i.is_remainder_target)
-    const plannedOut = others.filter(i => !inChecking(i))
-      .reduce((s, i) => s + perCheckShare(+i.budgeted_amount || 0, household?.pay_frequency), 0)
-    const allShares  = others.reduce((s, i) => s + perCheckShare(+i.budgeted_amount || 0, household?.pay_frequency), 0)
     const remainder  = (items || []).find(i => i.is_remainder_target)
-    const leftover   = Math.max(0, Math.round((net - allShares) * 100) / 100)
-    const toSavings  = plannedOut + (remainder && !inChecking(remainder) ? leftover : 0)
+    const shareOn    = (i, payday) => shareFor(i, { payday, held: balances[i.id] || 0, household })
+    const toSavingsOn = (payday) => {
+      const plannedOut = others.filter(i => !inChecking(i)).reduce((s, i) => s + shareOn(i, payday), 0)
+      const allShares  = others.reduce((s, i) => s + shareOn(i, payday), 0)
+      const leftover   = Math.max(0, Math.round((net - allShares) * 100) / 100)
+      return plannedOut + (remainder && !inChecking(remainder) ? leftover : 0)
+    }
+    const toSavings = paydays.length ? toSavingsOn(paydays[0].date) : 0   // for the caption
 
-    // Everyday spending: checking lines with a monthly budget but no due date.
-    const dated = new Set(bills.map(b => b.itemId))
+    // Everyday spending: flexible checking lines, spread across the month.
     const everyday = mine
-      .filter(i => !dated.has(i.id) && !i.due_day && !i.next_due_date)
+      .filter(i => !isScheduled(i))
       .reduce((s, i) => s + (+i.budgeted_amount || 0), 0)
 
     const run = projectDaily({
       startBalance, from, days,
       paydays, bills,
       monthlyEverydaySpend: everyday,
-      perPaydayToSavings: toSavings,
+      perPaydayToSavings: toSavingsOn,
     })
     return { ...run, paydays, bills, everyday, toSavings, from, to }
-  }, [household, checking, items, startBalance, days])
+  }, [household, checking, items, startBalance, balances, days])
 
   if (!checking) return null
   if (!model) return null
@@ -161,7 +168,7 @@ export default function BalanceProjection({ household, checking, items, startBal
 
           <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginTop: '0.55rem', lineHeight: 1.5 }}>
             {paydays.length} paycheck{paydays.length === 1 ? '' : 's'} · {bills.length} dated bill{bills.length === 1 ? '' : 's'}
-            {model.toSavings > 0 && <> · {fmt(model.toSavings)} per check out to savings</>}
+            {model.toSavings > 0 && <> · {fmt(model.toSavings)} out to savings on the next check</>}
             {everyday > 0 && <> · {fmt(everyday)}/mo everyday spending spread evenly</>}
           </div>
 
