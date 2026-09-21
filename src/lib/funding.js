@@ -41,12 +41,51 @@ export function billAmount(line) {
 }
 
 /**
+ * A payment landing within this many days AFTER a due date belongs to that due
+ * date (it was late), not to the next one.
+ */
+export const LATE_GRACE_DAYS = 7
+
+/**
  * The next date a scheduled line is due, on or after `onOrAfter`.
  *   monthly  -> next occurrence of due_day (clamped to the month's length)
  *   periodic -> next_due_date rolled forward by interval_months until it's ahead
  * Returns null when the line has no usable schedule.
+ *
+ * `lastPaid` (a Date, see lastPaymentFor) marks a bill PAID EARLY: a payment
+ * inside the current cycle - after the previous due date plus the late grace -
+ * means this due date is already met and the line is saving for the one after.
+ * Rob pays Sam's Club around the 10th for the 23rd; without this the line would
+ * read "behind $500" for two weeks every month.
  */
-export function nextDue(line, onOrAfter = new Date()) {
+export function nextDue(line, onOrAfter = new Date(), lastPaid = null) {
+  const due = rawNextDue(line, onOrAfter)
+  if (!due || !lastPaid) return due
+  const interval = Math.max(1, +line.interval_months || 1)
+  const prevDue  = addMonths(due, -interval)
+  const paid     = startOfDay(lastPaid)
+  if (isAfter(paid, addDays(prevDue, LATE_GRACE_DAYS)) && !isAfter(paid, due)) return rawNextDue(line, addDays(due, 1))
+  return due
+}
+
+/**
+ * When a bill was last paid, from the expenses logged on its line: the latest
+ * charge of at least half the bill. Half, so a fee or a partial logged on the
+ * line doesn't pass for the payment. Null for allowances and lines with no amount.
+ */
+export function lastPaymentFor(line, txns) {
+  if (isFlexible(line) || !(billAmount(line) > 0)) return null
+  const min = billAmount(line) / 2
+  let best = null
+  for (const t of txns || []) {
+    if (t.budget_item_id !== line.id || !(+t.amount >= min) || !t.date) continue
+    const d = startOfDay(parseISO(String(t.date).slice(0, 10)))
+    if (!best || isAfter(d, best)) best = d
+  }
+  return best
+}
+
+function rawNextDue(line, onOrAfter) {
   const from     = startOfDay(onOrAfter)
   const interval = +line.interval_months || 0
 
@@ -79,7 +118,7 @@ export function nextDue(line, onOrAfter = new Date()) {
  * this one included, and a payday ON the due date counts, because the money is in
  * the account when the bill hits.
  */
-export function shareFor(line, { payday, held = 0, household }) {
+export function shareFor(line, { payday, held = 0, household, lastPaid = null }) {
   if (isFlexible(line)) return round2(+line.per_check_amount || 0)
 
   // A scheduled line with no amount has nothing to fund toward. Contributing to
@@ -87,7 +126,7 @@ export function shareFor(line, { payday, held = 0, household }) {
   // an allocation. The Schedule page lists these under "needs an amount".
   if (!(billAmount(line) > 0)) return 0
 
-  const due = nextDue(line, payday)
+  const due = nextDue(line, payday, lastPaid)
   if (!due) return 0
   const need = billAmount(line) - (+held || 0)
   if (need <= 0) return 0
@@ -118,9 +157,9 @@ export const TIGHT_DAYS = 3
  *
  * Returns null for anything that isn't a bill with an amount and a date.
  */
-export function pace(line, { held = 0, today = new Date(), household }) {
+export function pace(line, { held = 0, today = new Date(), household, lastPaid = null }) {
   if (isFlexible(line) || !(billAmount(line) > 0)) return null
-  const due = nextDue(line, today)
+  const due = nextDue(line, today, lastPaid)
   if (!due) return null
   const from    = startOfDay(today)
   const bill    = billAmount(line)
@@ -184,10 +223,10 @@ export function safeToSpend(line, balance, ctx) {
 }
 
 /** One line of plain English explaining a share, for the paycheck sheet. */
-export function shareReason(line, { payday, held = 0, household }) {
+export function shareReason(line, { payday, held = 0, household, lastPaid = null }) {
   if (isFlexible(line)) return 'allowance'
   if (!(billAmount(line) > 0)) return 'no amount set — see Schedule'
-  const due = nextDue(line, payday)
+  const due = nextDue(line, payday, lastPaid)
   if (!due) return 'no due date set'
   const need = billAmount(line) - (+held || 0)
   if (need <= 0) return `already holds the ${fmt(billAmount(line))} due ${format(due, 'MMM d')}`
@@ -206,19 +245,22 @@ export function shareReason(line, { payday, held = 0, household }) {
  * paycheck sheet already uses so it can drop straight in.
  *
  * `balances` is budget_item_id -> what the envelope holds before this check.
+ * `lastPaid` is budget_item_id -> Date of the bill's last payment (lastPaymentFor),
+ * so a bill already paid this cycle is funded toward the following due date.
  * The remainder line's own share is ignored - it absorbs the leftover, plan or not.
  */
-export function planForCheck(lines, { payday, net, balances = {}, household, checkingId }) {
+export function planForCheck(lines, { payday, net, balances = {}, household, checkingId, lastPaid = {} }) {
   const rows = (lines || []).map(l => {
     const held  = balances[l.id] || 0
-    const share = l.is_remainder_target ? 0 : shareFor(l, { payday, held, household })
+    const paid  = lastPaid[l.id] || null
+    const share = l.is_remainder_target ? 0 : shareFor(l, { payday, held, household, lastPaid: paid })
     return {
       id: l.id,
       name: l.name,
       icon: l.category?.icon || '📋',
       catSort: l.category?.sort_order ?? 99,
       suggested: share,
-      reason: l.is_remainder_target ? 'gets the leftover' : shareReason(l, { payday, held, household }),
+      reason: l.is_remainder_target ? 'gets the leftover' : shareReason(l, { payday, held, household, lastPaid: paid }),
       accountId: l.account_id,
       ownAccount: !!(l.account_id && checkingId && l.account_id !== checkingId),
       isRemainder: !!l.is_remainder_target,

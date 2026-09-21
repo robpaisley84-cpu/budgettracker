@@ -59,7 +59,11 @@ export default function Help() {
       </Task>
 
       <Task icon="↔️" title="Move money between funds when something runs over">
-        Tap the fund's name on the home screen, choose <b>Move money</b>, pick where it's going and how much, and note why. The fund you took it from drops by that amount — and can go below zero if it lent more than it held, which is how you see what it's owed. Every move is recorded in <b>Activity</b>.
+        Tap the fund's name on the home screen. <b>Move to…</b> sends money out of it (including <b>Back to unassigned</b>, which just releases it to the pot); <b>Move from…</b> pulls money <i>in</i> from another fund, and the list only offers funds that actually have spare — never a bill. <b>Add from unassigned</b> tops it up from the pot. Every move is recorded in <b>Activity</b>, with a note if you leave one.
+      </Task>
+
+      <Task icon="⚖️" title="Balance the funds at month end">
+        When the home screen says the funds are out of balance, tap <b>⚖ Balance the funds</b>. It lists every overspent allowance and every bill behind pace with the amount that would square it, pre-ticked, and lets you cover them from <b>unassigned</b> in one go. Bills are only ever topped up here, never raided. If unassigned can't cover everything, untick the ones to leave for the next check.
       </Task>
 
       <Task icon="🎯" title="Tell the app what a fund really holds">
@@ -81,20 +85,16 @@ export default function Help() {
       {/* Home screen */}
       <h2 style={h2}>What the home screen shows you</h2>
 
-      <Task icon="📊" title="Money this month">
-        Top cards: what you'll earn this month, what you've spent, your budget, and what's left. Some months have <b>3 paychecks</b> — those are your cushion months.
+      <Task icon="💚" title="The big number: Safe to spend">
+        What's in checking that isn't spoken for by a bill — the allowance envelopes added up (overspent ones subtracted, because that money is already gone) plus anything still <b>unassigned</b>. It is the one number to trust before spending. It can be lower than a single green fund: if one fund is deep in the red, the cash under the green ones has already been used. Savings accounts aren't counted; they aren't checking.
       </Task>
 
-      <Task icon="🔁" title="Carry-over">
-        Because paychecks are every two weeks, most months have 2 and a couple have 3. This card tells you if you need to <b>carry money in from last month</b> to cover this one — or if you're <b>building a reserve</b> to use later.
-      </Task>
-
-      <Task icon="🎯" title="Priorities">
-        Everything is sorted into <b>Essentials</b> (must-haves), <b>Lifestyle</b> (the fun stuff that makes this worth doing), and <b>Savings goals</b>. A ✓ means your paycheck covers it. Savings goals are meant to be filled by <b>bonuses and 3-paycheck months</b> — so don't worry if they're not "covered" every month.
+      <Task icon="🎯" title="Reading a fund row">
+        Sorted <b>Essentials</b>, then <b>Lifestyle</b>, then <b>Savings goals</b>, biggest first; tap a tier heading to fold it. An <b>allowance</b> shows what it has left to spend — green, amber near empty, red overspent. A <b>bill</b> shows what it's holding in grey with <b>reserved</b> (holding what the due date needs), <b>on pace</b> (the checks before the due date will finish it), or <b>behind $X</b> (what to add today). Bills are funded <i>lean</i>: a loan due the 15th only needs half held after the 18th's check, because the 2nd's check supplies the rest — unless the check and the due date are within a few days, when it's held in full. A bill you paid early this month is already saving for next month.
       </Task>
 
       <Task icon="🔔" title="Due soon">
-        Upcoming yearly bills with how many days until they're due, so nothing sneaks up on us.
+        Upcoming bills with how many days until they're due and anything still to set aside, so nothing sneaks up on us.
       </Task>
 
       {/* Good to know */}

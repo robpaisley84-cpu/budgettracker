@@ -1,6 +1,6 @@
 // Sanity checks for src/lib/funding.js - not part of the app.
 // Run:  node funding-check.mjs      (same pattern as test-accrual.mjs)
-import { nextDue, shareFor, safeToSpend, shareReason, planForCheck, monthlyToPerCheck, shortfall, reserved } from './src/lib/funding.js'
+import { nextDue, shareFor, safeToSpend, shareReason, planForCheck, monthlyToPerCheck, shortfall, reserved, lastPaymentFor } from './src/lib/funding.js'
 import { paydaysBetween } from './src/lib/projection.js'
 import { format } from 'date-fns'
 
@@ -112,6 +112,24 @@ console.log('\nWhole check:')
 for (const r of plan) console.log(`  ${r.name.padEnd(16)} ${String(r.amount).padStart(8)}   ${r.reason}`)
 const total = plan.reduce((s, r) => s + +r.amount, 0)
 check('whole check sums to net', total, 3801.71)
+
+// --- Paid early: this due date is met, the line saves for the next one -------
+// Sam's Club: $500 due the 23rd, Rob pays around the 10th. On Sept 21 with the
+// Sept 10 payment logged, the line is saving for Oct 23 - not "behind $500" on Sept 23.
+const sams = { id: 's', funding_mode: 'scheduled', interval_months: 1, due_day: 23, bill_amount: 500, saved_so_far: 500, saved_as_of: '2026-08-31' }
+const samsPaid = lastPaymentFor(sams, [{ budget_item_id: 's', amount: 500, date: '2026-09-10' }])
+console.log('\nSam\'s Club paid Sept 10 → next due', on(nextDue(sams, d('2026-09-21'), samsPaid)), '(want Oct 23)')
+check('paid early: on pace, nothing behind',            shortfall(sams, { held: 0, today: d('2026-09-21'), household: hh, lastPaid: samsPaid }), 0)
+check('not paid: behind by the whole bill (no check before the 23rd)', shortfall(sams, { held: 0, today: d('2026-09-21'), household: hh }), 500)
+check('a fee on the line is not the payment',           lastPaymentFor(sams, [{ budget_item_id: 's', amount: 40, date: '2026-09-10' }]) ? 1 : 0, 0)
+check('Oct 2 check funds half of Oct 23',               shareFor(sams, { payday: d('2026-10-02'), held: 0, household: hh, lastPaid: samsPaid }), 250)
+// Truck Loan paid Sept 3 for the Sept 2 due date is a LATE payment - October is still owed
+const truckPaid = lastPaymentFor({ ...truck, id: 't' }, [{ budget_item_id: 't', amount: 677.33, date: '2026-09-03' }])
+console.log('Truck paid Sept 3 (a day late) → next due', on(nextDue(truck, d('2026-09-21'), truckPaid)), '(want Oct 2)')
+check('late payment does not roll the due date',        shortfall(truckA, { held: 600, today: d('2026-09-21'), household: hh, lastPaid: truckPaid }), 77)
+// 5th Wheel paid Sept 8 for Sept 15: by Sept 21 that cycle is over, Oct 15 is next either way
+const wheelPaid = lastPaymentFor({ ...wheel, id: 'w' }, [{ budget_item_id: 'w', amount: 835.77, date: '2026-09-08' }])
+check('payment from a finished cycle changes nothing',   reserved(wheelA, { held: 836.23, today: d('2026-09-21'), household: hh, lastPaid: wheelPaid }), 835.77 / 2)
 
 console.log(fails ? `\n*** ${fails} FAILED ***` : '\nALL PASS')
 process.exitCode = fails ? 1 : 0

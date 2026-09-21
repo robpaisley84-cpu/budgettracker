@@ -9,7 +9,7 @@ import { CHECKS_PER_YEAR, paydaysBetween } from '../lib/projection'
 // safeToSpend is aliased: this component already has a local `safeToSpend`
 // (the monthly figure below), and the import was silently shadowed by it -
 // the load then called a number, and production showed "A is not a function".
-import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount, shortfall, reserved as reservedFor } from '../lib/funding'
+import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount, shortfall, reserved as reservedFor, lastPaymentFor } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -197,7 +197,11 @@ export default function Dashboard() {
       // Hayley's number (015): a flexible line's balance is spendable; a
       // scheduled bill's is reserved, so only a surplus over the bill counts.
       const scheduled = isScheduled(item)
-      const due       = scheduled ? nextDue(item, new Date()) : null
+      // A bill paid early this cycle (Sam's Club on the 10th for the 23rd) is
+      // already saving for the following due date - not "behind" on this one.
+      const lastPaid  = scheduled ? lastPaymentFor(item, fundTxns || []) : null
+      const ctx       = { household, lastPaid }
+      const due       = scheduled ? nextDue(item, new Date(), lastPaid) : null
 
       return {
         backedBy: backing?.name || null,
@@ -211,16 +215,16 @@ export default function Dashboard() {
         // Lean where the timing allows, full where the check and the bill are
         // close (TIGHT_DAYS): a bill's spare is what it holds beyond what's
         // reserved for it, and that spare IS spendable.
-        safe: safeToSpendFor(item, balance, { household }),
-        reserved: scheduled ? reservedFor(item, { held: balance, household }) : 0,
+        safe: safeToSpendFor(item, balance, ctx),
+        reserved: scheduled ? reservedFor(item, { ...ctx, held: balance }) : 0,
         tier: item.tier || 'essential',
         // The number the row displays - a bill shows what it holds, an allowance
         // what's spendable - so the list can sort by what the eye sees.
-        shown: (scheduled && billAmount(item) > 0) ? balance : safeToSpendFor(item, balance, { household }),
+        shown: (scheduled && billAmount(item) > 0) ? balance : safeToSpendFor(item, balance, ctx),
         bill: scheduled ? billAmount(item) : null,
         // Behind an even funding pace, not merely below full - an annual bill
         // three checks into its year is meant to be mostly empty.
-        short: scheduled ? shortfall(item, { held: balance, household }) : 0,
+        short: scheduled ? shortfall(item, { ...ctx, held: balance }) : 0,
         dueNext: due,
         perCheck: +item.per_check_amount || 0,
         monthlyBudget,
@@ -321,29 +325,10 @@ export default function Dashboard() {
     setTierTotals(tierT)
   }
 
-  const buffer = NET_MO - summary.spent
-  const bufColor = buffer >= 1000 ? 'var(--green)' : buffer >= 0 ? 'var(--amber)' : 'var(--red)'
-
-  // Income minus what's gone AND what's still owed on bills this month.
-  const safeToSpend = Math.round((NET_MO - summary.spent - committed) * 100) / 100
-
-  // Carry-over: does this month's income cover the full budget? Lean (2-check) months
-  // need money carried in from a prior surplus; extra-check months build the reserve.
-  const monthNet = NET_MO - summary.budgeted
-
-  // Projection
-  const dayOfMonth = isCurrentMonth ? getDate(new Date()) : getDaysInMonth(viewMonth)
-  const daysInMonth = getDaysInMonth(viewMonth)
-  const dailyRate = dayOfMonth > 0 ? summary.spent / dayOfMonth : 0
-  const projectedSpend = Math.round(dailyRate * daysInMonth)
-  const projectedRemaining = NET_MO - projectedSpend
-  const projColor = projectedRemaining >= 500 ? 'var(--green)' : projectedRemaining >= 0 ? 'var(--amber)' : 'var(--red)'
-
-  // YTD projection
-  const ytdDailyRate = ytd.months > 0 ? ytd.spent / (ytd.months * 30) : 0
-  const projectedYearSpend = Math.round(ytdDailyRate * 365)
-  const yearBudget = summary.budgeted * 12
-  const yearIncome = perCheck * (CHECKS_PER_YEAR[payFreq] || 26)  // true annual, not the current month × 12
+  // The month-model cards (income vs spend, carry-over, priorities, projections,
+  // YTD) came off this page on 2026-09-21: they answered "how is the month going"
+  // with a second definition of safe-to-spend that contradicted the envelopes.
+  // The envelopes ARE the page now (015); history lives on Budget and Transactions.
 
   async function togglePin(itemId, currentlyPinned) {
     await supabase.from('budget_items').update({ is_pinned: !currentlyPinned }).eq('id', itemId)
@@ -564,11 +549,8 @@ export default function Dashboard() {
             <Link to="/settings" title="Settings" style={{ textDecoration: 'none', fontSize: '1.1rem' }}>⚙️</Link>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button onClick={() => setViewMonth(d => subMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>‹</button>
-          <h1 style={{ flex: 1, fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', textAlign: 'center' }}>{format(viewMonth, 'MMMM yyyy')}</h1>
-          <button onClick={() => setViewMonth(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>›</button>
-        </div>
+        {/* Today, not a month: every number on this page is "right now" */}
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 400, color: 'var(--accentL)', textAlign: 'center' }}>{format(new Date(), 'EEEE, MMMM d')}</h1>
       </div>
 
       {loadErr && (
@@ -698,9 +680,13 @@ export default function Dashboard() {
                           {f.ownAccount && <> · 🏦 {f.backedBy}</>}
                         </div>
                       </div>
-                      {/* Green big numbers are spendable. A bill's big number is what it
-                          HOLDS, in grey - it's spoken for, not spendable - so a fully funded
-                          loan never reads as "empty". Amber if it's behind. */}
+                      {/* Every row says in words what its number means, so Hayley never
+                          has to infer it from a colour. An allowance: the big number IS
+                          what's safe to spend, captioned as such (or "overspent"). A bill:
+                          the big number is what it HOLDS, in grey - spoken for, not
+                          spendable - and the caption says how much of it, if any, is safe
+                          to spend. A fund in its own savings account is savings, not
+                          spending money, and says so. */}
                       <div style={{ textAlign: 'right' }}>
                         {f.scheduled && f.bill > 0 ? (() => {
                           const behind = f.short > 0.5
@@ -708,18 +694,27 @@ export default function Dashboard() {
                             <>
                               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: behind ? 'var(--amber)' : 'var(--muted)' }}>
                                 {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
+                                <span style={{ fontSize: '0.56rem', fontWeight: 400, color: 'var(--muted)' }}> held</span>
                               </div>
-                              <div style={{ fontSize: '0.52rem', color: behind ? 'var(--amber)' : f.safe >= 1 ? 'var(--green)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-                                {behind ? `behind ${fmt(f.short)}`
-                                  : f.safe >= 1 ? `${fmt(f.reserved)} reserved · ${fmt(f.safe)} spare`
-                                  : f.fundBalance < f.bill - 0.5 ? 'on pace' : 'reserved'}
+                              <div style={{ fontSize: '0.54rem', color: behind ? 'var(--amber)' : f.safe >= 1 ? 'var(--green)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap', fontWeight: f.safe >= 1 ? 700 : 400 }}>
+                                {behind ? `behind ${fmt(f.short)} · $0 to spend`
+                                  : f.safe >= 1 ? `${fmt(f.safe)} safe to spend`
+                                  : f.fundBalance < f.bill - 0.5 ? 'on pace · $0 to spend' : 'reserved · $0 to spend'}
                               </div>
                             </>
                           )
                         })() : (
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: safeColor }}>
-                            {f.safe < 0 ? '-' : ''}{fmt(f.safe)}
-                          </div>
+                          <>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: f.ownAccount ? 'var(--muted)' : safeColor }}>
+                              {f.safe < 0 ? '-' : ''}{fmt(f.safe)}
+                            </div>
+                            <div style={{ fontSize: '0.54rem', color: f.ownAccount ? 'var(--muted)' : safeColor, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap', fontWeight: f.safe >= 1 && !f.ownAccount ? 700 : 400 }}>
+                              {f.ownAccount ? 'in savings'
+                                : f.safe < -0.5 ? 'overspent'
+                                : f.safe < 1 ? 'nothing left'
+                                : 'safe to spend'}
+                            </div>
+                          </>
                         )}
                       </div>
                     </div>
@@ -736,97 +731,13 @@ export default function Dashboard() {
               })}
               {funds.length > 0 && (
                 <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', padding: '0.45rem', borderTop: '1px solid var(--border)' }}>
-                  Biggest first within each tier · tap a header to fold it · tap a fund to set its balance or move money
+                  Green = safe to spend now · grey = held for a bill · red = already overspent · tap a fund to move money
                 </div>
               )}
             </div>
           </div>
         )
       })()}
-
-      {/* Key metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1rem' }}>
-        {[
-          { l: `Monthly Income (${payCount}×)`, v: fmt(NET_MO), c: 'var(--green)' },
-          { l: 'Spent This Month', v: fmt(summary.spent), c: 'var(--accentL)' },
-          { l: 'Budget', v: fmt(summary.budgeted), c: 'var(--muted)' },
-          { l: 'Income Left', v: fmt(buffer), c: bufColor },
-        ].map(x => (
-          <div key={x.l} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem' }}>{x.l}</div>
-            <div style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 500, color: x.c }}>{x.v}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Safe to spend — income left after everything still owed this month.
-          "Income Left" above is income minus spend only, which counts unpaid
-          bills as available; this is the number you can actually act on. */}
-      <div style={{ background: 'var(--card)', border: `1px solid ${safeToSpend < 0 ? 'var(--red)' : 'var(--accent)'}`, borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem', marginBottom: '0.5rem' }}>
-          <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Safe to Spend</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: safeToSpend < 0 ? 'var(--red)' : 'var(--accentL)' }}>
-            {safeToSpend < 0 ? '-' : ''}{fmt(safeToSpend)}
-          </div>
-        </div>
-        <div style={{ fontSize: '0.62rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Income this month</span><span>{fmt(NET_MO)}</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Spent so far</span><span>−{fmt(summary.spent)}</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Bills &amp; set-asides still owed</span><span>−{fmt(committed)}</span></div>
-        </div>
-        <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginTop: '0.5rem', lineHeight: 1.45 }}>
-          Flexible lines like groceries aren't deducted — that's the money this figure is telling you about.
-        </div>
-      </div>
-
-      {/* Carry-over from previous month */}
-      <div style={{ background: 'var(--card)', border: `1px solid ${monthNet < 0 ? 'var(--red)' : 'var(--green)'}`, borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem' }}>
-          <div>
-            <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem' }}>
-              {monthNet < 0 ? 'Carry-over needed' : 'Building reserve'}
-            </div>
-            <div style={{ fontSize: '1.35rem', fontFamily: 'var(--font-mono)', fontWeight: 500, color: monthNet < 0 ? 'var(--red)' : 'var(--green)' }}>
-              {monthNet >= 0 ? '+' : ''}{fmt(monthNet)}
-            </div>
-          </div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textAlign: 'right', maxWidth: '60%', lineHeight: 1.4 }}>
-            {payCount} paycheck{payCount !== 1 ? 's' : ''} this month.{' '}
-            {monthNet < 0
-              ? `Income (${fmt(NET_MO)}) is under budget (${fmt(summary.budgeted)}) — cover the gap from last month's surplus.`
-              : `Income covers the budget — set this aside for lean months.`}
-          </div>
-        </div>
-      </div>
-
-      {/* Priorities vs income (tiers) */}
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
-        <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Priorities vs income</div>
-        {(() => {
-          const rows = [
-            { k: 'essential', label: 'Essentials',    color: 'var(--tierE)' },
-            { k: 'lifestyle', label: 'Lifestyle',     color: 'var(--tierL)' },
-            { k: 'savings',   label: 'Savings goals', color: 'var(--tierS)' },
-          ]
-          let cum = 0
-          return rows.map((t, i) => {
-            cum += tierTotals[t.k] || 0
-            const covered = cum <= NET_MO
-            const isSavings = t.k === 'savings'
-            return (
-              <div key={t.k} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.32rem 0', borderTop: i > 0 ? '1px solid var(--hairline)' : 'none' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: t.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: '0.8rem', color: 'var(--text)' }}>{t.label}{isSavings && <span style={{ fontSize: '0.6rem', color: 'var(--muted)' }}> · bonus-funded</span>}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: t.color }}>{fmt(tierTotals[t.k] || 0)}</span>
-                <span style={{ fontSize: '0.7rem', minWidth: '1.2rem', textAlign: 'right', color: isSavings ? 'var(--muted)' : covered ? 'var(--green)' : 'var(--amber)' }}>{isSavings ? '·' : covered ? '✓' : '△'}</span>
-              </div>
-            )
-          })
-        })()}
-        <div style={{ fontSize: '0.64rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
-          ✓ = covered by this month's income ({fmt(NET_MO)}). Savings goals are meant for bonuses &amp; 3-paycheck months.
-        </div>
-      </div>
 
       {/* Due soon reminders */}
       {dueSoon.length > 0 && (
@@ -853,111 +764,6 @@ export default function Dashboard() {
           })}
         </div>
       )}
-
-      {/* Progress bar */}
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>
-          <span>Monthly spending progress</span>
-          <span style={{ color: bufColor }}>{Math.round((summary.spent/NET_MO)*100)}% of income used</span>
-        </div>
-        <div style={{ background: 'var(--border)', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-          <div style={{ width: `${Math.min((summary.spent/NET_MO)*100, 100)}%`, height: '100%', background: bufColor, borderRadius: '4px', transition: 'width 0.4s' }} />
-        </div>
-      </div>
-
-      {/* Projected End of Month */}
-      {isCurrentMonth && summary.spent > 0 && (
-        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.85rem', marginBottom: '1rem' }}>
-          <div style={{ fontSize: '0.65rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.6rem' }}>Projected End of Month</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center' }}>
-            <div>
-              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Daily Avg</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: 'var(--accentL)', fontWeight: 500 }}>{fmt(dailyRate)}/day</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Proj. Spend</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: 'var(--accentL)', fontWeight: 500 }}>{fmt(projectedSpend)}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase' }}>Proj. Balance</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: projColor, fontWeight: 500 }}>{projectedRemaining < 0 ? '-' : ''}{fmt(projectedRemaining)}</div>
-            </div>
-          </div>
-          <div style={{ marginTop: '0.5rem', fontSize: '0.6rem', color: 'var(--muted)', textAlign: 'center' }}>
-            Based on {dayOfMonth} of {daysInMonth} days elapsed
-          </div>
-        </div>
-      )}
-
-      {/* YTD Overview */}
-      <div style={{ marginBottom: '1rem' }}>
-        <button onClick={() => setShowYtd(!showYtd)} style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: showYtd ? 'var(--radius) var(--radius) 0 0' : 'var(--radius)', padding: '0.75rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: 'var(--text)' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 400 }}>Year to Date — {format(viewMonth, 'yyyy')}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: ytd.spent <= ytd.budgeted ? 'var(--green)' : 'var(--red)' }}>{fmt(ytd.spent)} / {fmt(ytd.budgeted)}</span>
-            <span style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{showYtd ? '▲' : '▼'}</span>
-          </div>
-        </button>
-
-        {showYtd && (
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 var(--radius) var(--radius)', padding: '0.85rem', marginTop: '-1px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center', marginBottom: '0.85rem' }}>
-              {[
-                { l: 'YTD Budget', v: fmt(ytd.budgeted), c: 'var(--muted)' },
-                { l: 'YTD Spent', v: fmt(ytd.spent), c: 'var(--accentL)' },
-                { l: 'YTD Savings', v: fmt(ytd.budgeted - ytd.spent), c: ytd.budgeted - ytd.spent >= 0 ? 'var(--green)' : 'var(--red)' },
-              ].map(x => (
-                <div key={x.l}>
-                  <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{x.l}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: x.c, fontWeight: 500 }}>{x.v}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>Monthly Breakdown</div>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.25rem', height: '80px', marginBottom: '0.25rem' }}>
-              {monthlyBreakdown.map(m => {
-                const maxVal = Math.max(summary.budgeted, ...monthlyBreakdown.map(x => x.spent))
-                const barH = maxVal > 0 ? (m.spent / maxVal) * 100 : 0
-                const budgetH = maxVal > 0 ? (m.budgeted / maxVal) * 100 : 0
-                const overBudget = m.spent > m.budgeted
-                return (
-                  <div key={m.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', position: 'relative' }}>
-                    <div style={{ position: 'absolute', bottom: `${budgetH}%`, left: 0, right: 0, borderTop: '1px dashed var(--muted)', opacity: 0.3 }} />
-                    <div style={{ width: '100%', height: `${barH}%`, background: overBudget ? 'var(--red)' : 'var(--green)', borderRadius: '3px 3px 0 0', minHeight: m.spent > 0 ? '3px' : 0, transition: 'height 0.3s' }} />
-                  </div>
-                )
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: '0.25rem' }}>
-              {monthlyBreakdown.map(m => (
-                <div key={m.month} style={{ flex: 1, textAlign: 'center', fontSize: '0.55rem', color: m.month === month ? 'var(--accentL)' : 'var(--muted)', fontWeight: m.month === month ? 700 : 400 }}>{m.label}</div>
-              ))}
-            </div>
-
-            {ytd.spent > 0 && (
-              <div style={{ marginTop: '0.85rem', padding: '0.65rem', background: 'var(--bg)', borderRadius: '7px' }}>
-                <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.4rem' }}>Year-End Projection</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', textAlign: 'center' }}>
-                  {[
-                    { l: 'Proj. Expenses', v: fmt(projectedYearSpend), c: 'var(--accentL)' },
-                    { l: 'Annual Budget', v: fmt(yearBudget), c: 'var(--muted)' },
-                    { l: 'Proj. Net', v: fmt(yearIncome - projectedYearSpend), c: yearIncome - projectedYearSpend >= 0 ? 'var(--green)' : 'var(--red)' },
-                  ].map(x => (
-                    <div key={x.l}>
-                      <div style={{ fontSize: '0.55rem', color: 'var(--muted)', textTransform: 'uppercase' }}>{x.l}</div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: x.c, fontWeight: 500 }}>{x.v}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.35rem' }}>
-                  Avg {fmt(ytd.spent / ytd.months)}/mo over {ytd.months} month{ytd.months > 1 ? 's' : ''}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Balance the funds — cover every overspent allowance and short bill from
           unassigned in one pass. No tap-outside dismiss; Cancel or Apply. */}

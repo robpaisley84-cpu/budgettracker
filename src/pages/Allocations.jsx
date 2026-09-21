@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, startOfDay } from 'date-fns'
 import { paydaysBetween } from '../lib/projection'
-import { planForCheck } from '../lib/funding'
+import { planForCheck, lastPaymentFor } from '../lib/funding'
 import { linesPerAccount, anchorsFor, spendSinceAnchor, allocatedSinceAnchor, fundBalance } from '../lib/funds'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
@@ -77,6 +77,8 @@ export default function Allocations() {
     const led = {
       allocs: allocs || [],
       spent: spendSinceAnchor(exp, itemAnchor, savedAsOf),
+      // A bill paid early this cycle is funded toward the NEXT due date
+      lastPaid: Object.fromEntries((bi || []).map(i => [i.id, lastPaymentFor(i, exp || [])])),
       savedAsOf,
       perAccount: linesPerAccount(bi),
       accountBalance: Object.fromEntries((a || []).map(x => [x.id, +x.balance])),
@@ -121,6 +123,7 @@ export default function Allocations() {
       balances: balancesFrom(itemsList, led, excludePaycheckId),
       household,
       checkingId: checkingAcct?.id || null,
+      lastPaid: led?.lastPaid || {},
     })
     if (Object.keys(already).length === 0) return rows
     for (const r of rows) r.amount = String(already[r.id] ?? 0)
