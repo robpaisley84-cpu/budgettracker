@@ -401,22 +401,30 @@ export default function Dashboard() {
       budget_month: today.slice(0, 7),
     }
     const amt = Math.abs(+moveAmt)
-    const { error } = await supabase.from('paycheck_allocations').insert([
-      { ...base, budget_item_id: trueUp.id, amount: -amt, note: moveNote || `Moved to ${dest?.name || 'another fund'}` },
-      { ...base, budget_item_id: moveTo,    amount:  amt, note: moveNote || `Moved from ${trueUp.name}` },
-    ])
+    // "Back to unassigned" is a one-sided move: the source drops, nothing else
+    // rises, and the dollars fall out of every envelope's claim on checking -
+    // which is exactly what "the pot" means. Reassign them on Accounts, or let
+    // the next check's leftover pick them up. The plan is untouched.
+    const toPot = moveTo === '__pot__'
+    const rows = toPot
+      ? [{ ...base, budget_item_id: trueUp.id, amount: -amt, note: moveNote || 'Returned to unassigned' }]
+      : [{ ...base, budget_item_id: trueUp.id, amount: -amt, note: moveNote || `Moved to ${dest?.name || 'another fund'}` },
+         { ...base, budget_item_id: moveTo,    amount:  amt, note: moveNote || `Moved from ${trueUp.name}` }]
+    const { error } = await supabase.from('paycheck_allocations').insert(rows)
     if (error) { setTrueUpSaving(false); setRecentErr(`Couldn't move money: ${error.message}`); return }
 
-    // If the two lines live in different accounts, the money has to move at
-    // the bank too — record the real transfer so both account balances follow.
-    if (trueUp.backingAccountId && dest?.backingAccountId && trueUp.backingAccountId !== dest.backingAccountId) {
+    // If the money changes accounts, it has to move at the bank too — record the
+    // real transfer so both balances follow. The pot lives in checking.
+    const checkingId  = accounts.find(a => a.type === 'checking')?.id || null
+    const destAccount = toPot ? checkingId : (dest?.backingAccountId || null)
+    if (trueUp.backingAccountId && destAccount && trueUp.backingAccountId !== destAccount) {
       const { error: tErr } = await supabase.from('transactions').insert({
         household_id: household.id,
         account_id: trueUp.backingAccountId,
-        to_account_id: dest.backingAccountId,
+        to_account_id: destAccount,
         type: 'transfer',
         amount: amt,
-        description: moveNote || `Moved: ${trueUp.name} → ${dest.name}`,
+        description: moveNote || (toPot ? `Returned to checking from ${trueUp.name}` : `Moved: ${trueUp.name} → ${dest.name}`),
         date: today, budget_month: today.slice(0, 7),
       })
       if (tErr) { setTrueUpSaving(false); setRecentErr(`Envelopes moved, but the account transfer didn't save: ${tErr.message}`); return }
@@ -858,9 +866,12 @@ export default function Dashboard() {
                 <select value={moveTo} onChange={e => setMoveTo(e.target.value)}
                   style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.85rem' }}>
                   <option value="">Choose a fund…</option>
-                  {funds.filter(f => f.id !== trueUp.id).map(f => (
-                    <option key={f.id} value={f.id}>{f.name} ({fmt(f.fundBalance)})</option>
-                  ))}
+                  <option value="__pot__">↩ Back to unassigned — reallocate later</option>
+                  <optgroup label="Another fund">
+                    {funds.filter(f => f.id !== trueUp.id).map(f => (
+                      <option key={f.id} value={f.id}>{f.name} ({fmt(f.fundBalance)})</option>
+                    ))}
+                  </optgroup>
                 </select>
 
                 <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Amount</label>
@@ -880,16 +891,23 @@ export default function Dashboard() {
                       <span>{trueUp.name}</span>
                       <span style={{ color: (trueUp.fundBalance - +moveAmt) < 0 ? 'var(--red)' : 'var(--text)' }}>{fmt(trueUp.fundBalance)} → {(trueUp.fundBalance - +moveAmt) < 0 ? '-' : ''}{fmt(trueUp.fundBalance - +moveAmt)}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{funds.find(f => f.id === moveTo)?.name}</span>
-                      <span>{fmt(funds.find(f => f.id === moveTo)?.fundBalance || 0)} → {fmt((funds.find(f => f.id === moveTo)?.fundBalance || 0) + +moveAmt)}</span>
-                    </div>
+                    {moveTo === '__pot__' ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Unassigned in checking</span>
+                        <span style={{ color: 'var(--amber)' }}>+{fmt(+moveAmt)} · assign it on Accounts, or the next check's leftover takes it</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{funds.find(f => f.id === moveTo)?.name}</span>
+                        <span>{fmt(funds.find(f => f.id === moveTo)?.fundBalance || 0)} → {fmt((funds.find(f => f.id === moveTo)?.fundBalance || 0) + +moveAmt)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <button onClick={moveMoney} disabled={trueUpSaving || !moveTo || !(+moveAmt > 0)}
                   style={{ width: '100%', background: 'var(--accent)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: 'var(--onAccent)', fontWeight: 700, fontSize: '0.9rem' }}>
-                  {trueUpSaving ? 'Moving…' : 'Move money'}
+                  {trueUpSaving ? 'Moving…' : moveTo === '__pot__' ? 'Return to unassigned' : 'Move money'}
                 </button>
               </>
             ) : (
