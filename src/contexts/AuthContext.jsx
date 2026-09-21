@@ -10,11 +10,16 @@ export function AuthProvider({ children }) {
   const [loading, setLoading]     = useState(true)
 
   useEffect(() => {
+    // getSession() can stall (supabase-js takes a browser lock that another
+    // open tab may hold). Never leave the app on "Loading" for that - after a
+    // few seconds fall through to the sign-in screen, which is always safe.
+    const bail = setTimeout(() => setLoading(false), 6000)
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
       if (session?.user) loadHousehold(session.user.id)
       else setLoading(false)
-    }).catch(() => setLoading(false))
+    }).catch(() => setLoading(false)).finally(() => clearTimeout(bail))
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_, session) => {
       setUser(session?.user ?? null)

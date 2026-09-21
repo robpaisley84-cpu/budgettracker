@@ -11,6 +11,7 @@ import Transactions from './pages/Transactions'
 import Allocations  from './pages/Allocations'
 import Settings     from './pages/Settings'
 import Nav          from './components/Nav'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function RequireAuth({ children }) {
   const { user, household, loading } = useAuth()
@@ -56,7 +57,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppShell />
+        <ErrorBoundary>
+          <AppShell />
+        </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
   )

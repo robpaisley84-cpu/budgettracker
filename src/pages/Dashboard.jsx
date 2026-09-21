@@ -43,6 +43,7 @@ export default function Dashboard() {
   const [tierTotals, setTierTotals]   = useState({ essential: 0, lifestyle: 0, savings: 0 })
   const [committed, setCommitted]     = useState(0)
   const [loading, setLoading]         = useState(true)
+  const [loadErr, setLoadErr]         = useState('')   // shown instead of spinning forever
   const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
   const [editFunds, setEditFunds]     = useState(false)
@@ -65,8 +66,17 @@ export default function Dashboard() {
 
   useEffect(() => { if (household) load() }, [household, month])
 
+  // Anything thrown in here used to leave the page on "Loading…" with no way to
+  // see why. Now the error is caught, shown, and loading always resolves.
   async function load() {
     setLoading(true)
+    setLoadErr('')
+    try { await loadInner() }
+    catch (e) { console.error('Dashboard load failed:', e); setLoadErr(String(e?.message || e)) }
+    finally { setLoading(false) }
+  }
+
+  async function loadInner() {
     const year = format(viewMonth, 'yyyy')
     const janMonth = `${year}-01`
     const selectedMonthNum = parseInt(format(viewMonth, 'M'))
@@ -290,7 +300,6 @@ export default function Dashboard() {
     const tierT = { essential: 0, lifestyle: 0, savings: 0 }
     ;(items || []).forEach(i => { tierT[i.tier || 'essential'] += +i.budgeted_amount })
     setTierTotals(tierT)
-    setLoading(false)
   }
 
   const buffer = NET_MO - summary.spent
@@ -437,6 +446,14 @@ export default function Dashboard() {
           <button onClick={() => setViewMonth(d => addMonths(d, 1))} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: '5px', width: '28px', height: '28px', fontSize: '1rem' }}>›</button>
         </div>
       </div>
+
+      {loadErr && (
+        <div style={{ background: 'var(--dangerBg)', border: '1px solid var(--red)', borderRadius: '8px', padding: '0.7rem 0.85rem', marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.65rem', color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.3rem' }}>Couldn't load the dashboard</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text)', fontFamily: 'var(--font-mono)', wordBreak: 'break-word', lineHeight: 1.45 }}>{loadErr}</div>
+          <button onClick={load} style={{ marginTop: '0.6rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', padding: '0.35rem 0.7rem', color: 'var(--muted)', fontSize: '0.72rem' }}>Try again</button>
+        </div>
+      )}
 
       {/* Safe to spend — the front page is the envelopes, not the month (015).
           One number per fund, right now. Scheduled bills show as reserved. */}
