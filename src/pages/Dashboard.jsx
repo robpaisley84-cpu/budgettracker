@@ -353,6 +353,48 @@ export default function Dashboard() {
     ...['essential', 'lifestyle', 'savings'].map(t => ({ key: t, items: funds.filter(f => !f.isPinned && f.tier === t) })),
   ].filter(g => g.items.length > 0)
 
+  // Shared by the headline and the Balance sheet. A "bill" is a scheduled line
+  // WITH an amount; a scheduled line with none is just an overspend.
+  const checkingAcc = accounts.find(a => a.type === 'checking')
+  const inChk  = (f) => f.backingAccountId === checkingAcc?.id
+  const isBill = (f) => f.scheduled && f.bill > 0
+  const unassigned = checkingAcc ? +checkingAcc.balance - funds.filter(inChk).reduce((s, f) => s + f.fundBalance, 0) : null
+
+  // --- Balance the funds: cover overspent allowances and short bills from
+  // unassigned, in one pass. Rob's monthly job, as one sheet. Bills are only
+  // ever ADDED to here - a bill's envelope is never a source. ---
+  const [showBalance, setShowBalance] = useState(false)
+  const [balRows, setBalRows]         = useState([])
+  const [balSaving, setBalSaving]     = useState(false)
+  const [balErr, setBalErr]           = useState('')
+
+  function openBalance() {
+    const rows = funds.filter(inChk).flatMap(f => {
+      if (isBill(f)) {
+        const short = f.bill - f.fundBalance
+        return short > 0.5 ? [{ id: f.id, name: f.name, kind: 'bill', deficit: short, amount: String(Math.round(short * 100) / 100), on: true }] : []
+      }
+      return f.safe < -0.5 ? [{ id: f.id, name: f.name, kind: 'over', deficit: -f.safe, amount: String(Math.round(-f.safe * 100) / 100), on: true }] : []
+    }).sort((a, b) => b.deficit - a.deficit)
+    setBalRows(rows); setBalErr(''); setShowBalance(true)
+  }
+
+  async function applyBalance() {
+    const picks = balRows.filter(r => r.on && +r.amount > 0)
+    const total = picks.reduce((s, r) => s + +r.amount, 0)
+    if (!picks.length || total > (unassigned || 0) + 0.005) return
+    setBalSaving(true)
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const { error } = await supabase.from('paycheck_allocations').insert(picks.map(r => ({
+      household_id: household.id, budget_item_id: r.id, amount: Math.round(+r.amount * 100) / 100,
+      date: today, budget_month: today.slice(0, 7), note: 'Balanced from unassigned',
+    })))
+    setBalSaving(false)
+    if (error) { setBalErr(`Couldn't balance: ${error.message}`); return }
+    setShowBalance(false)
+    load()
+  }
+
   function openTrueUp(f) {
     setTrueUp(f)
     setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
@@ -498,15 +540,13 @@ export default function Dashboard() {
         // already consumed cash out from under the positive ones, so adding up only
         // the greens overstates it; and savings-account funds aren't checking at
         // all. A scheduled line with no amount is a plain overspend, not a bill.
-        const checkingAcc = accounts.find(a => a.type === 'checking')
-        const inChk  = (f) => f.backingAccountId === checkingAcc?.id
-        const isBill = (f) => f.scheduled && f.bill > 0
         const flex   = funds.filter(f => inChk(f) && !isBill(f))
         const spendNet   = flex.reduce((s, f) => s + f.safe, 0)
         const spendPos   = flex.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
         const overspent  = flex.reduce((s, f) => s + (f.safe < 0 ? f.safe : 0), 0)
         const inSavings  = funds.filter(f => !inChk(f) && !isBill(f)).reduce((s, f) => s + Math.max(0, f.safe), 0)
-        const unassigned = checkingAcc ? +checkingAcc.balance - funds.filter(inChk).reduce((s, f) => s + f.fundBalance, 0) : null
+        const shortBills = funds.filter(f => inChk(f) && isBill(f) && f.bill - f.fundBalance > 0.5).length
+        const outOfBalance = overspent < -0.5 || shortBills > 0 || Math.abs(unassigned || 0) >= 1
         const nextPay     = paydaysBetween(household, new Date(), addDays(new Date(), 45))[0]?.date
         const daysToPay   = nextPay ? differenceInCalendarDays(nextPay, new Date()) : null
         return (
@@ -538,6 +578,12 @@ export default function Dashboard() {
                 )}
                 {inSavings > 0 && (
                   <div style={{ fontSize: '0.58rem', color: 'var(--muted)', marginTop: '0.15rem' }}>{fmt(inSavings)} in savings accounts, not counted</div>
+                )}
+                {outOfBalance && (
+                  <button onClick={openBalance}
+                    style={{ marginTop: '0.55rem', background: (overspent < -0.5 || shortBills > 0) && (unassigned || 0) > 1 ? 'var(--accent)' : 'transparent', border: '1px solid var(--accent)', borderRadius: '7px', padding: '0.4rem 0.75rem', color: (overspent < -0.5 || shortBills > 0) && (unassigned || 0) > 1 ? 'var(--onAccent)' : 'var(--accent)', fontSize: '0.74rem', fontWeight: 700 }}>
+                    ⚖ Balance the funds
+                  </button>
                 )}
               </div>
               ) })()}
@@ -864,6 +910,76 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Balance the funds — cover every overspent allowance and short bill from
+          unassigned in one pass. No tap-outside dismiss; Cancel or Apply. */}
+      {showBalance && (() => {
+        const avail  = unassigned || 0
+        const picks  = balRows.filter(r => r.on && +r.amount > 0)
+        const total  = picks.reduce((s, r) => s + (+r.amount || 0), 0)
+        const over   = total > avail + 0.005
+        const need   = balRows.reduce((s, r) => s + r.deficit, 0)
+        const setRow = (id, patch) => setBalRows(rows => rows.map(r => r.id === id ? { ...r, ...patch } : r))
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}>
+            <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.1rem 1.1rem 1.6rem', width: '100%', maxWidth: '600px', margin: '0 auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.35rem' }}>Balance the funds</div>
+                <button onClick={() => setShowBalance(false)} aria-label="Close" style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '1.1rem', lineHeight: 1 }}>✕</button>
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
+                Cover what's overspent and top up any bill that's behind, from money in checking that no fund has claimed. Bills are never a source. Untick anything you'd rather leave.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', background: 'var(--bg)', border: `1px solid ${over ? 'var(--red)' : 'var(--border)'}`, borderRadius: '8px', padding: '0.6rem 0.8rem', marginBottom: '0.75rem', textAlign: 'center' }}>
+                {[
+                  { l: 'Unassigned', v: fmt(avail), c: 'var(--amber)' },
+                  { l: 'Needed', v: fmt(need), c: 'var(--muted)' },
+                  { l: 'Covering', v: fmt(total), c: over ? 'var(--red)' : 'var(--green)' },
+                ].map(x => (
+                  <div key={x.l}>
+                    <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{x.l}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.95rem', color: x.c }}>{x.v}</div>
+                  </div>
+                ))}
+              </div>
+              {over && <div style={{ fontSize: '0.68rem', color: 'var(--red)', marginBottom: '0.5rem' }}>That's {fmt(total - avail)} more than is unassigned — untick or trim something.</div>}
+              {balErr && <div style={{ fontSize: '0.7rem', color: 'var(--red)', marginBottom: '0.5rem' }}>⚠️ {balErr}</div>}
+
+              <div style={{ flex: 1, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '8px', marginBottom: '0.75rem' }}>
+                {balRows.length === 0 && <div style={{ padding: '1rem', fontSize: '0.78rem', color: 'var(--muted)', textAlign: 'center' }}>Nothing is overspent or behind. The funds balance.</div>}
+                {balRows.map((r, i) => (
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0.7rem', borderBottom: i < balRows.length - 1 ? '1px solid var(--hairline)' : 'none', opacity: r.on ? 1 : 0.5 }}>
+                    <input type="checkbox" checked={r.on} onChange={e => setRow(r.id, { on: e.target.checked })} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                      <div style={{ fontSize: '0.58rem', color: r.kind === 'bill' ? 'var(--amber)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                        {r.kind === 'bill' ? `bill short ${fmt(r.deficit)}` : `overspent ${fmt(r.deficit)}`}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '6px', padding: '0 0.4rem' }}>
+                      <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>$</span>
+                      <input type="number" step="0.01" value={r.amount} disabled={!r.on} onChange={e => setRow(r.id, { amount: e.target.value })}
+                        style={{ width: '4.6rem', background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '0.82rem', fontFamily: 'var(--font-mono)', padding: '0.35rem 0', textAlign: 'right' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button onClick={() => setShowBalance(false)} style={{ flex: 1, background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.7rem', color: 'var(--muted)', fontSize: '0.8rem' }}>Cancel</button>
+                <button onClick={applyBalance} disabled={balSaving || over || picks.length === 0}
+                  style={{ flex: 2, background: over || picks.length === 0 ? 'var(--border)' : 'var(--green)', border: 'none', borderRadius: '8px', padding: '0.7rem', color: over || picks.length === 0 ? 'var(--muted)' : 'var(--onAccent)', fontWeight: 700, fontSize: '0.85rem' }}>
+                  {balSaving ? 'Applying…' : `Apply · ${fmt(total)} from unassigned`}
+                </button>
+              </div>
+              <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.5rem', lineHeight: 1.45 }}>
+                Each cover is recorded as an allocation, so Activity shows exactly what was balanced and when. The plan is untouched.
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* True-up sheet — record what a fund actually holds right now */}
       {trueUp && (
