@@ -525,16 +525,33 @@ export default function Dashboard() {
                         </div>
                         <div style={{ fontSize: '0.56rem', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
                           {f.scheduled
-                            ? <>reserved · {fmt(f.fundBalance)} of {fmt(f.bill)}{f.dueNext && <> · due {format(f.dueNext, 'MMM d')}</>}</>
+                            ? <>{f.bill > 0 ? <>{fmt(f.bill)} bill</> : <span style={{ color: 'var(--red)' }}>no amount set</span>}{f.dueNext && <> · due {format(f.dueNext, 'MMM d')}</>}</>
                             : <>{fmt(f.perCheck)}/check{f.thisMonthSpent > 0 && <> · {fmt(f.thisMonthSpent)} spent this mo</>}</>}
                           {f.ownAccount && <> · 🏦 {f.backedBy}</>}
                         </div>
                       </div>
+                      {/* Green big numbers are spendable. A bill's big number is what it
+                          HOLDS, in grey - it's spoken for, not spendable - so a fully funded
+                          loan never reads as "empty". Amber if it's behind. */}
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: safeColor }}>
-                          {f.safe < 0 ? '-' : ''}{fmt(f.safe)}
-                        </div>
-                        {f.scheduled && f.safe === 0 && <div style={{ fontSize: '0.52rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>reserved</div>}
+                        {f.scheduled && f.bill > 0 ? (() => {
+                          const short = f.bill - f.fundBalance
+                          const behind = short > 0.5
+                          return (
+                            <>
+                              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: behind ? 'var(--amber)' : 'var(--muted)' }}>
+                                {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
+                              </div>
+                              <div style={{ fontSize: '0.52rem', color: behind ? 'var(--amber)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+                                {behind ? `short ${fmt(short)}` : f.safe >= 1 ? `reserved · ${fmt(f.safe)} spare` : 'reserved'}
+                              </div>
+                            </>
+                          )
+                        })() : (
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: safeColor }}>
+                            {f.safe < 0 ? '-' : ''}{fmt(f.safe)}
+                          </div>
+                        )}
                       </div>
                     </div>
                     {pct !== null && (
