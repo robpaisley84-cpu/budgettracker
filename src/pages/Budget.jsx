@@ -370,7 +370,15 @@ export default function Budget() {
                             {/* Shown even at zero spend — "what's left" is most
                                 useful at the start of a month, before anything
                                 has been logged against the line. */}
-                            {!isEditing && +item.budgeted_amount > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? '▲' : '▼'} {fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>}
+                            {/* A bill is paid or it isn't - "23¢ left" on a loan payment says
+                                nothing. Allowances keep left/over, in cents when it's under a dollar. */}
+                            {!isEditing && (auto && billAmount(item) > 0
+                              ? (spent >= billAmount(item) * 0.98
+                                  ? <span style={{ color: 'var(--green)', marginLeft: '0.4rem' }}>✓ paid this month</span>
+                                  : <span style={{ color: 'var(--muted)', marginLeft: '0.4rem' }}>not yet paid{due && <> · due the {format(due, 'do')}</>}</span>)
+                              : auto
+                                ? <span style={{ color: 'var(--red)', marginLeft: '0.4rem' }}>▲ {fmt2(spent)} spent · no amount set</span>
+                                : +item.budgeted_amount > 0 && <span style={{ color: isOver ? 'var(--red)' : 'var(--green)', marginLeft: '0.4rem' }}>{isOver ? '▲' : '▼'} {Math.abs(left) < 1 ? fmt2(Math.abs(left)) : fmt(Math.abs(left))} {isOver ? 'over' : 'left'}</span>)}
                           </div>
                           {/* Where this envelope lives. Checking = virtual; anything else = the line is that account. */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.15rem' }}>
@@ -390,7 +398,7 @@ export default function Budget() {
                             title={open ? 'Hide expenses' : `Show the ${lineTxns.length} expense${lineTxns.length === 1 ? '' : 's'} behind this`}
                             style={{ background: 'transparent', border: 'none', padding: '0.1rem 0.2rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
                             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: isOver ? 'var(--red)' : 'var(--accentL)' }}>{fmt(spent)}</span>
-                            <span style={{ fontSize: '0.55rem', color: 'var(--muted)' }}>{open ? '▴' : `${lineTxns.length}▾`}</span>
+                            <span style={{ fontSize: '0.62rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{lineTxns.length} {open ? '▲' : '▼'}</span>
                           </button>
                         )}
                         {confirmDel === item.id ? (
