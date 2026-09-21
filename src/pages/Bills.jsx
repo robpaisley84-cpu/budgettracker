@@ -141,7 +141,6 @@ export default function Bills() {
       ? (markPaidToday ? dueFromLastPaid(lastPaid, n) : (form.nextDue || (lastPaid ? dueFromLastPaid(lastPaid, n) : null)))
       : null
 
-    const savedSoFar = periodic && form.saved !== '' && form.saved != null ? +form.saved : null
     const amount = +form.amount || null
 
     const patch = {
@@ -154,10 +153,20 @@ export default function Bills() {
       last_paid_date:   periodic ? lastPaid : null,
       next_due_date:    nextDue,
       auto_accrue:      !!(periodic && amount > 0),
-      // Paying resets the fund to 0 as of today; otherwise anchor the entered
-      // balance to today so the catch-up prorates from now.
-      saved_so_far:     markPaidToday ? 0 : savedSoFar,
-      saved_as_of:      markPaidToday ? lastPaid : (savedSoFar != null ? todayISO() : null),
+    }
+
+    // The anchor (saved_so_far / saved_as_of) is the line's starting balance. It
+    // is ONLY written here when something actually changes it: marking a bill
+    // paid resets it to 0 today; typing a different "set aside so far" on a
+    // longer-cycle bill anchors that figure to today. Editing a monthly bill's
+    // amount or due day must leave it alone - an earlier version blanked it,
+    // which erased Google Fi's one-payment-ahead balance on 2026-09-21.
+    if (markPaidToday) {
+      patch.saved_so_far = 0
+      patch.saved_as_of  = lastPaid
+    } else if (periodic && form.saved !== '' && form.saved != null && +form.saved !== +(edit.saved_so_far ?? NaN)) {
+      patch.saved_so_far = +form.saved
+      patch.saved_as_of  = todayISO()
     }
 
     // budgeted_amount stays the monthly equivalent (015): the charge itself for a
