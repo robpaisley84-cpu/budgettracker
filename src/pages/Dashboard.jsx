@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -47,9 +47,8 @@ export default function Dashboard() {
   const [committed, setCommitted]     = useState(0)
   const [loading, setLoading]         = useState(true)
   const [loadErr, setLoadErr]         = useState('')   // shown instead of spinning forever
-  const [showAll, setShowAll]         = useState(false)
   const [showYtd, setShowYtd]         = useState(false)
-  const [editFunds, setEditFunds]     = useState(false)
+  const [collapsed, setCollapsed]     = useState({})   // tier groups folded shut on the Safe to spend list
   const [trueUp, setTrueUp]           = useState(null)   // fund being trued up
   const [trueUpVal, setTrueUpVal]     = useState('')
   const [trueUpSaving, setTrueUpSaving] = useState(false)
@@ -206,6 +205,10 @@ export default function Dashboard() {
         name: item.name,
         scheduled,
         safe: safeToSpendFor(item, balance),
+        tier: item.tier || 'essential',
+        // The number the row displays - a bill shows what it holds, an allowance
+        // what's spendable - so the list can sort by what the eye sees.
+        shown: (scheduled && billAmount(item) > 0) ? balance : safeToSpendFor(item, balance),
         bill: scheduled ? billAmount(item) : null,
         dueNext: due,
         perCheck: +item.per_check_amount || 0,
@@ -228,11 +231,13 @@ export default function Dashboard() {
         color: item.category?.color || 'var(--muted)',
       }
     }).sort((a, b) => {
-      // Pinned items first, then by sort order, then by fund balance
-      if (a.isPinned && !b.isPinned) return -1
-      if (!a.isPinned && b.isPinned) return 1
-      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
-      return a.fundBalance - b.fundBalance
+      // Pinned first; then essentials, lifestyle, savings; within a tier the
+      // biggest displayed number first. Rule-based, so no manual reorder.
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
+      const rank = { essential: 0, lifestyle: 1, savings: 2 }
+      if (rank[a.tier] !== rank[b.tier]) return (rank[a.tier] ?? 9) - (rank[b.tier] ?? 9)
+      if (b.shown !== a.shown) return b.shown - a.shown
+      return a.name.localeCompare(b.name)
     })
 
     const budgeted = (items || []).reduce((s, i) => s + +i.budgeted_amount, 0)
@@ -334,26 +339,18 @@ export default function Dashboard() {
     load()
   }
 
-  async function moveFund(itemId, direction) {
-    const idx = funds.findIndex(f => f.id === itemId)
-    if (idx < 0) return
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (swapIdx < 0 || swapIdx >= funds.length) return
-
-    const current = funds[idx]
-    const swap = funds[swapIdx]
-
-    // Only reorder within same group (pinned/unpinned)
-    if (current.isPinned !== swap.isPinned) return
-
-    await Promise.all([
-      supabase.from('budget_items').update({ fund_sort_order: swap.sortOrder || swapIdx }).eq('id', current.id),
-      supabase.from('budget_items').update({ fund_sort_order: current.sortOrder || idx }).eq('id', swap.id),
-    ])
-    load()
+  // The Safe to spend list, grouped: pinned, then each tier in priority order.
+  // `funds` is already sorted that way, so each group keeps its order.
+  const TIER_META = {
+    pinned:    { label: 'Pinned',     color: 'var(--accent)' },
+    essential: { label: 'Essentials', color: 'var(--tierE)' },
+    lifestyle: { label: 'Lifestyle',  color: 'var(--tierL)' },
+    savings:   { label: 'Savings',    color: 'var(--tierS)' },
   }
-
-  const visibleFunds = showAll ? funds : funds.slice(0, 12)
+  const fundGroups = [
+    { key: 'pinned', items: funds.filter(f => f.isPinned) },
+    ...['essential', 'lifestyle', 'savings'].map(t => ({ key: t, items: funds.filter(f => !f.isPinned && f.tier === t) })),
+  ].filter(g => g.items.length > 0)
 
   function openTrueUp(f) {
     setTrueUp(f)
@@ -469,12 +466,7 @@ export default function Dashboard() {
           <div style={{ marginBottom: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
               <h2 style={{ fontSize: '0.78rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Safe to spend</h2>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <button onClick={() => setEditFunds(!editFunds)} style={{ background: editFunds ? 'var(--accent)' : 'transparent', border: `1px solid ${editFunds ? 'var(--accent)' : 'var(--border)'}`, color: editFunds ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '5px', padding: '0.2rem 0.45rem', fontSize: '0.62rem', cursor: 'pointer', fontWeight: editFunds ? 700 : 400 }}>
-                  {editFunds ? 'Done' : 'Reorder'}
-                </button>
-                <Link to="/bills" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Schedule →</Link>
-              </div>
+              <Link to="/bills" style={{ fontSize: '0.72rem', color: 'var(--accent)', textDecoration: 'none' }}>Schedule →</Link>
             </div>
 
             {/* Headline: what's spendable across every fund, and when the next check lands */}
@@ -494,31 +486,49 @@ export default function Dashboard() {
             </div>
 
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 var(--radius) var(--radius)', overflow: 'hidden' }}>
-              {visibleFunds.length === 0 && (
+              {funds.length === 0 && (
                 <div style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', padding: '1.5rem' }}>
                   No budget items yet — <Link to="/budget" style={{ color: 'var(--accent)' }}>set up your budget</Link>
                 </div>
               )}
-              {visibleFunds.map((f, i) => {
+              {fundGroups.map(g => {
+                const meta     = TIER_META[g.key]
+                const isOpen   = !collapsed[g.key]
+                const spend    = g.items.reduce((s, f) => s + (!f.scheduled && f.safe > 0 ? f.safe : 0), 0)
+                const held     = g.items.reduce((s, f) => s + (f.scheduled && f.bill > 0 ? Math.max(0, f.fundBalance) : 0), 0)
+                const over     = g.items.reduce((s, f) => s + (!f.scheduled && f.safe < 0 ? f.safe : 0), 0)
+                return (
+                  <Fragment key={g.key}>
+                    {/* Tier header - tap to fold the group. Shows what the tier has to
+                        spend, what it's holding for bills, and any overspend. */}
+                    <button onClick={() => setCollapsed(c => ({ ...c, [g.key]: !c[g.key] }))}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.9rem', background: 'var(--bgAlt)', border: 'none', borderTop: '1px solid var(--border)', borderBottom: isOpen ? '1px solid var(--border)' : 'none', textAlign: 'left', cursor: 'pointer' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: meta.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: '0.68rem', color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
+                        {meta.label} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>· {g.items.length}</span>
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.66rem', whiteSpace: 'nowrap' }}>
+                        {spend > 0 && <span style={{ color: 'var(--green)' }}>{fmt(spend)} to spend</span>}
+                        {held > 0 && <span style={{ color: 'var(--muted)' }}>{spend > 0 ? ' · ' : ''}{fmt(held)} held</span>}
+                        {over < 0 && <span style={{ color: 'var(--red)' }}> · {fmt(over)} over</span>}
+                      </span>
+                      <span style={{ color: 'var(--muted)', fontSize: '0.6rem' }}>{isOpen ? '▲' : '▼'}</span>
+                    </button>
+
+                    {isOpen && g.items.map((f, i) => {
                 const safeColor = f.safe < 0 ? 'var(--red)' : f.safe === 0 ? 'var(--muted)' : f.safe < f.perCheck * 0.35 ? 'var(--amber)' : 'var(--green)'
                 const pct = f.scheduled && f.bill > 0 ? Math.min(100, Math.max(0, (f.fundBalance / f.bill) * 100)) : null
                 return (
-                  <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < visibleFunds.length-1 ? '1px solid var(--border)' : 'none', background: f.isPinned ? 'var(--pinned)' : 'transparent' }}>
+                  <div key={f.id} style={{ padding: '0.55rem 0.9rem', borderBottom: i < g.items.length-1 ? '1px solid var(--hairline)' : 'none', background: f.isPinned ? 'var(--pinned)' : 'transparent' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      {editFunds && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                          <button onClick={() => moveFund(f.id, 'up')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▲</button>
-                          <button onClick={() => moveFund(f.id, 'down')} style={{ background: 'transparent', border: 'none', color: 'var(--muted)', fontSize: '0.6rem', padding: '0', lineHeight: 1, cursor: 'pointer' }}>▼</button>
-                        </div>
-                      )}
                       <button onClick={() => togglePin(f.id, f.isPinned)} style={{ background: 'transparent', border: 'none', fontSize: '0.75rem', padding: 0, cursor: 'pointer', opacity: f.isPinned ? 1 : 0.35 }} title={f.isPinned ? 'Unpin' : 'Pin to top'}>
                         {f.isPinned ? '⭐' : '☆'}
                       </button>
                       <div style={{ flex: 1, minWidth: 0 }}
-                        onClick={() => { if (!editFunds) openTrueUp(f) }}
-                        role={!editFunds ? 'button' : undefined}
-                        title={!editFunds ? (f.soleOwn ? 'Move money' : 'Set the real balance or move money') : undefined}>
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: !editFunds ? 'pointer' : 'default' }}>
+                        onClick={() => openTrueUp(f)}
+                        role="button"
+                        title={f.soleOwn ? 'Move money' : 'Set the real balance or move money'}>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>
                           {f.name}
                           {f.trued && !f.soleOwn && <span style={{ color: 'var(--muted)', fontSize: '0.58rem' }} title="Balance trued up"> ✓</span>}
                           {f.isRemainderTarget && <span style={{ color: 'var(--accent)', fontSize: '0.58rem' }} title="Receives each paycheck's leftover"> ⤵</span>}
@@ -555,22 +565,20 @@ export default function Dashboard() {
                       </div>
                     </div>
                     {pct !== null && (
-                      <div style={{ marginTop: '0.3rem', marginLeft: editFunds ? '1.1rem' : '1.65rem', background: 'var(--border)', borderRadius: '3px', height: '3px', overflow: 'hidden' }}>
+                      <div style={{ marginTop: '0.3rem', marginLeft: '1.65rem', background: 'var(--border)', borderRadius: '3px', height: '3px', overflow: 'hidden' }}>
                         <div style={{ width: `${pct}%`, height: '100%', background: pct >= 100 ? 'var(--green)' : 'var(--accent)', borderRadius: '3px', transition: 'width 0.3s' }} />
                       </div>
                     )}
                   </div>
                 )
+                    })}
+                  </Fragment>
+                )
               })}
-              {visibleFunds.length > 0 && !editFunds && (
+              {funds.length > 0 && (
                 <div style={{ fontSize: '0.58rem', color: 'var(--muted)', textAlign: 'center', padding: '0.45rem', borderTop: '1px solid var(--border)' }}>
-                  Tap a fund to set what it really holds, or move money between funds
+                  Biggest first within each tier · tap a header to fold it · tap a fund to set its balance or move money
                 </div>
-              )}
-              {funds.length > 12 && (
-                <button onClick={() => setShowAll(!showAll)} style={{ width: '100%', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', color: 'var(--accent)', fontSize: '0.72rem', padding: '0.6rem', cursor: 'pointer' }}>
-                  {showAll ? 'Show less' : `Show all ${funds.length} funds`}
-                </button>
               )}
             </div>
           </div>
