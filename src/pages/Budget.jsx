@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format, addMonths, subMonths } from 'date-fns'
 import { isScheduled, nextDue, billAmount, perCheckToMonthly, monthlyToPerCheck } from '../lib/funding'
 
-const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
+const fmt  = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
+const fmt2 = (n) => '$' + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const TIERS = {
   essential: { label: 'Essentials', short: 'E', color: 'var(--tierE)' },
@@ -19,6 +20,8 @@ export default function Budget() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [categories, setCategories]   = useState([])
   const [actuals, setActuals]         = useState({})
+  const [txnsByItem, setTxnsByItem]   = useState({})   // the expenses behind each line's total
+  const [showTxns, setShowTxns]       = useState({})   // which lines are drilled open
   const [expanded, setExpanded]       = useState({})
   const [loading, setLoading]         = useState(true)
   const [editing, setEditing]         = useState(null)
@@ -70,16 +73,24 @@ export default function Budget() {
     setLoading(false)
   }
 
+  // Both the per-line totals and the individual expenses behind them, so a
+  // line can be drilled open to see exactly what made up its number.
   async function loadActuals() {
     const { data } = await supabase
       .from('transactions')
-      .select('budget_item_id, amount')
+      .select('id, budget_item_id, amount, date, description')
       .eq('household_id', household.id)
       .eq('budget_month', month)
       .eq('type', 'expense')
-    const map = {}
-    data?.forEach(t => { map[t.budget_item_id] = (map[t.budget_item_id] || 0) + +t.amount })
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+    const map = {}, byItem = {}
+    data?.forEach(t => {
+      map[t.budget_item_id] = (map[t.budget_item_id] || 0) + +t.amount
+      ;(byItem[t.budget_item_id] ||= []).push(t)
+    })
     setActuals(map)
+    setTxnsByItem(byItem)
   }
 
   // A flexible line's allowance. Whichever unit was typed, both columns are
@@ -302,8 +313,12 @@ export default function Budget() {
                     const due  = auto ? nextDue(item, new Date()) : null
                     const isEditing = editing === item.id && !auto
 
+                    const lineTxns = txnsByItem[item.id] || []
+                    const open = !!showTxns[item.id] && lineTxns.length > 0
+
                     return (
-                      <div key={item.id} style={{ display: 'flex', padding: '0.42rem 0.9rem', borderBottom: idx < items.length-1 ? '1px solid var(--hairline)' : 'none', alignItems: 'center', gap: '0.5rem' }}>
+                      <Fragment key={item.id}>
+                      <div style={{ display: 'flex', padding: '0.42rem 0.9rem', borderBottom: (idx < items.length-1 && !open) ? '1px solid var(--hairline)' : 'none', alignItems: 'center', gap: '0.5rem' }}>
                         <div style={{ flex: 1 }}>
                           {renaming === item.id ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginBottom: '0.1rem' }}>
@@ -370,7 +385,13 @@ export default function Budget() {
                           </div>
                         </div>
                         {spent > 0 && (
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: isOver ? 'var(--red)' : 'var(--accentL)' }}>{fmt(spent)}</span>
+                          // Tap the total to see the expenses behind it
+                          <button onClick={() => setShowTxns(s => ({ ...s, [item.id]: !s[item.id] }))}
+                            title={open ? 'Hide expenses' : `Show the ${lineTxns.length} expense${lineTxns.length === 1 ? '' : 's'} behind this`}
+                            style={{ background: 'transparent', border: 'none', padding: '0.1rem 0.2rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', color: isOver ? 'var(--red)' : 'var(--accentL)' }}>{fmt(spent)}</span>
+                            <span style={{ fontSize: '0.55rem', color: 'var(--muted)' }}>{open ? '▴' : `${lineTxns.length}▾`}</span>
+                          </button>
                         )}
                         {confirmDel === item.id ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
@@ -393,6 +414,26 @@ export default function Budget() {
                           </>
                         )}
                       </div>
+
+                      {/* The expenses behind the total. Each opens on the Log page for editing —
+                          a duplicate or a mis-filed entry is fixed from here in two taps. */}
+                      {open && (
+                        <div style={{ background: 'var(--bg)', padding: '0.25rem 0.9rem 0.45rem 1.5rem', borderBottom: idx < items.length-1 ? '1px solid var(--hairline)' : 'none' }}>
+                          {lineTxns.map(t => (
+                            <Link key={t.id} to={`/transactions?edit=${t.id}`} title="Edit this entry on the Log page"
+                              style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', padding: '0.22rem 0', textDecoration: 'none', color: 'inherit' }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--muted)', minWidth: '3rem' }}>{format(new Date(t.date + 'T12:00'), 'MMM d')}</span>
+                              <span style={{ flex: 1, fontSize: '0.7rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || <span style={{ color: 'var(--muted)' }}>no description</span>}</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--accentL)' }}>{fmt2(t.amount)}</span>
+                            </Link>
+                          ))}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.58rem', color: 'var(--muted)', marginTop: '0.25rem', paddingTop: '0.25rem', borderTop: '1px solid var(--hairline)' }}>
+                            <span>{lineTxns.length} entr{lineTxns.length === 1 ? 'y' : 'ies'} · tap one to edit</span>
+                            <span style={{ fontFamily: 'var(--font-mono)' }}>{fmt2(spent)}</span>
+                          </div>
+                        </div>
+                      )}
+                      </Fragment>
                     )
                   })}
                   <div style={{ padding: '0.35rem 0.9rem', borderTop: items.length > 0 ? '1px solid var(--hairline)' : 'none' }}>

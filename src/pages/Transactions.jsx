@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { format } from 'date-fns'
@@ -17,8 +18,20 @@ export default function Transactions() {
   const [filter, setFilter]             = useState('all')
   const [err, setErr]                   = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   useEffect(() => { if (household) load() }, [household])
+
+  // Deep link from the Budget page: /transactions?edit=<id> opens that entry's
+  // sheet straight away, then drops the query so a refresh doesn't reopen it.
+  useEffect(() => {
+    const id = new URLSearchParams(location.search).get('edit')
+    if (!id || loading) return
+    const t = transactions.find(x => x.id === id)
+    if (t) editTransaction(t)
+    navigate('/transactions', { replace: true })
+  }, [location.search, loading, transactions])
 
   useEffect(() => {
     if (!household) return

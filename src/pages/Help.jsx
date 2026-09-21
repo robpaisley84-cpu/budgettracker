@@ -51,7 +51,7 @@ export default function Help() {
       </Task>
 
       <Task icon="✏️" title="Change what you budget for something">
-        On <b>Budget</b>, tap the dollar amount under any line and type a new number. Tap the line's <b>name</b> to rename it, or the coloured chip to change its tier. To add or remove a line, use <b>+ Add line item</b> or the little ✕ — removing asks you to confirm first.
+        On <b>Budget</b>, tap the <b>spent</b> figure on any line to see the expenses behind it — tap one to open and fix it (a duplicate, a wrong line). Tap the dollar amount under a line and type a new number to change its allowance. Tap the line's <b>name</b> to rename it, or the coloured chip to change its tier. To add or remove a line, use <b>+ Add line item</b> or the little ✕ — removing asks you to confirm first.
       </Task>
 
       <Task icon="🔁" title="Re-split a paycheck you already processed">
