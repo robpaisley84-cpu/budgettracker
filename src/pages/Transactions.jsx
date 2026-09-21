@@ -16,6 +16,7 @@ export default function Transactions() {
   const [saving, setSaving]             = useState(false)
   const [loading, setLoading]           = useState(true)
   const [filter, setFilter]             = useState('all')
+  const [cardFilter, setCardFilter]     = useState('')     // '' = every card
   const [err, setErr]                   = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const location = useLocation()
@@ -83,10 +84,18 @@ export default function Transactions() {
       date: t.date,
       account_id: t.account_id || '',
       budget_item_id: t.budget_item_id || '',
+      payment_method: t.payment_method || '',
     })
     setConfirmDelete(false)
     setShowLog(true)
   }
+
+  // Cards already used, most frequent first - offered as suggestions so
+  // "Amex" doesn't also become "AMEX" and "amex".
+  const cards = Object.entries(transactions.reduce((m, t) => {
+    if (t.payment_method) m[t.payment_method] = (m[t.payment_method] || 0) + 1
+    return m
+  }, {})).sort((a, b) => b[1] - a[1]).map(([k]) => k)
 
   function newTransaction() {
     setForm({ type: 'expense', date: format(new Date(), 'yyyy-MM-dd') })
@@ -111,6 +120,8 @@ export default function Transactions() {
       description: form.description || '',
       date: form.date,
       budget_month: form.date?.slice(0, 7),
+      // what it was paid with (016) - expenses only; blank stays blank
+      payment_method: form.type === 'expense' ? (form.payment_method?.trim() || null) : null,
     }
 
     const { error } = form.id
@@ -150,7 +161,10 @@ export default function Transactions() {
     setForm({ type: 'expense', date: format(new Date(), 'yyyy-MM-dd') })
   }
 
-  const filtered = filter === 'all' ? transactions : transactions.filter(t => t.type === filter)
+  const filtered = transactions
+    .filter(t => filter === 'all' || t.type === filter)
+    .filter(t => !cardFilter || (cardFilter === '—' ? (t.type === 'expense' && !t.payment_method) : t.payment_method === cardFilter))
+  const filteredTotal = filtered.filter(t => t.type === 'expense').reduce((s, t) => s + +t.amount, 0)
 
   const groupByDate = (txns) => {
     const groups = {}
@@ -180,6 +194,22 @@ export default function Transactions() {
             <button key={f} onClick={() => setFilter(f)} style={{ background: filter === f ? 'var(--accent)' : 'transparent', color: filter === f ? 'var(--onAccent)' : 'var(--muted)', border: `1px solid ${filter === f ? 'var(--accent)' : 'var(--border)'}`, borderRadius: '5px', padding: '0.28rem 0.6rem', fontSize: '0.72rem', fontWeight: filter === f ? 700 : 400, textTransform: 'capitalize' }}>{f}</button>
           ))}
         </div>
+        {/* By card - for checking a statement against what's logged (016) */}
+        {cards.length > 0 && (
+          <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>paid with</span>
+            {[...cards, '—'].map(cd => {
+              const on = cardFilter === cd
+              return (
+                <button key={cd} onClick={() => setCardFilter(on ? '' : cd)} title={cd === '—' ? 'Expenses with no card recorded' : undefined}
+                  style={{ background: on ? 'var(--accentL)' : 'transparent', color: on ? 'var(--onAccent)' : 'var(--muted)', border: `1px solid ${on ? 'var(--accentL)' : 'var(--border)'}`, borderRadius: '999px', padding: '0.15rem 0.55rem', fontSize: '0.66rem', fontWeight: on ? 700 : 400 }}>
+                  {cd === '—' ? 'no card' : cd}
+                </button>
+              )
+            })}
+            {cardFilter && <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--accentL)' }}>{fmt(filteredTotal)}</span>}
+          </div>
+        )}
       </div>
 
       {/* Error banner — never fail silently into an empty list */}
@@ -215,6 +245,7 @@ export default function Transactions() {
                     <div style={{ fontSize: '0.62rem', color: 'var(--muted)' }}>
                       {t.budget_item?.category?.name && <span>{t.budget_item.category.name} · </span>}
                       {t.account?.name || t.type}
+                      {t.payment_method && <span style={{ marginLeft: '0.4rem', border: '1px solid var(--border)', borderRadius: '999px', padding: '0 0.4rem', fontSize: '0.58rem' }}>{t.payment_method}</span>}
                     </div>
                   </div>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.88rem', color: typeColors[t.type], flexShrink: 0 }}>
@@ -262,6 +293,25 @@ export default function Transactions() {
                     </optgroup>
                   ))}
                 </select>
+              </>
+            )}
+
+            {/* Paid with - expenses only. Free text with the cards already used as suggestions. */}
+            {form.type === 'expense' && (
+              <>
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Paid with</label>
+                <input list="paid-with-options" value={form.payment_method || ''} onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))} placeholder="Amex, Chase Visa, Debit, Cash…"
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.35rem' }} />
+                <datalist id="paid-with-options">{cards.map(cd => <option key={cd} value={cd} />)}</datalist>
+                {cards.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+                    {cards.slice(0, 6).map(cd => (
+                      <button key={cd} type="button" onClick={() => setForm(f => ({ ...f, payment_method: cd }))}
+                        style={{ background: form.payment_method === cd ? 'var(--accentL)' : 'transparent', color: form.payment_method === cd ? 'var(--onAccent)' : 'var(--muted)', border: `1px solid ${form.payment_method === cd ? 'var(--accentL)' : 'var(--border)'}`, borderRadius: '999px', padding: '0.15rem 0.55rem', fontSize: '0.66rem' }}>{cd}</button>
+                    ))}
+                  </div>
+                )}
+                {cards.length === 0 && <div style={{ height: '0.5rem' }} />}
               </>
             )}
 

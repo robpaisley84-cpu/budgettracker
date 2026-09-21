@@ -66,6 +66,10 @@ export default function Help() {
         A fund's balance is what you've put into it, minus what you've spent from it. If a fund already held money before you started tracking, tap its <b>name</b> under Funds Available and enter the real figure — that becomes its opening balance, and everything counts up from there. Same on <b>Accounts</b>: tap a card to set its true balance.
       </Task>
 
+      <Task icon="💳" title="Record which card paid for something">
+        When you log an expense, <b>Paid with</b> takes a card name — Amex, Chase Visa, Debit, Cash. It offers the ones you've used before so the spelling stays the same. On the <b>Log</b> page, tap a card chip under the filters to see only that card's purchases and their total — that's how you check a statement against what's logged. It doesn't change where the money comes from: a card purchase still hits its budget line the day you buy.
+      </Task>
+
       <Task icon="🧮" title="Split one account across several funds">
         A savings account holding just one budget line <i>is</i> that line — one number, and it can never drift. If you keep several sinking funds in <b>one</b> account, its card on <b>Accounts</b> shows how much of the balance the lines have claimed and how much is still <b>unassigned</b>. Tap <b>Assign balance</b> to divide it up; each figure saves as you type it and becomes that fund's balance as of today. Nothing moves at the bank — you're describing money that's already there.
       </Task>

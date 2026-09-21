@@ -78,7 +78,7 @@ export default function Budget() {
   async function loadActuals() {
     const { data } = await supabase
       .from('transactions')
-      .select('id, budget_item_id, amount, date, description')
+      .select('id, budget_item_id, amount, date, description, payment_method')
       .eq('household_id', household.id)
       .eq('budget_month', month)
       .eq('type', 'expense')
@@ -431,7 +431,10 @@ export default function Budget() {
                             <Link key={t.id} to={`/transactions?edit=${t.id}`} title="Edit this entry on the Log page"
                               style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', padding: '0.22rem 0', textDecoration: 'none', color: 'inherit' }}>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.62rem', color: 'var(--muted)', minWidth: '3rem' }}>{format(new Date(t.date + 'T12:00'), 'MMM d')}</span>
-                              <span style={{ flex: 1, fontSize: '0.7rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description || <span style={{ color: 'var(--muted)' }}>no description</span>}</span>
+                              <span style={{ flex: 1, fontSize: '0.7rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {t.description || <span style={{ color: 'var(--muted)' }}>no description</span>}
+                                {t.payment_method && <span style={{ marginLeft: '0.35rem', color: 'var(--muted)', fontSize: '0.58rem', border: '1px solid var(--border)', borderRadius: '999px', padding: '0 0.35rem' }}>{t.payment_method}</span>}
+                              </span>
                               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--accentL)' }}>{fmt2(t.amount)}</span>
                             </Link>
                           ))}
