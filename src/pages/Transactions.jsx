@@ -25,13 +25,25 @@ export default function Transactions() {
 
   // Deep link from the Budget page: /transactions?edit=<id> opens that entry's
   // sheet straight away, then drops the query so a refresh doesn't reopen it.
+  // The list below is capped, so the entry may not be in it - fetch by id
+  // rather than depend on the list having loaded (or having it at all).
   useEffect(() => {
     const id = new URLSearchParams(location.search).get('edit')
-    if (!id || loading) return
-    const t = transactions.find(x => x.id === id)
-    if (t) editTransaction(t)
-    navigate('/transactions', { replace: true })
-  }, [location.search, loading, transactions])
+    if (!id || !household) return
+    let cancelled = false
+    ;(async () => {
+      let t = transactions.find(x => x.id === id)
+      if (!t) {
+        const { data } = await supabase.from('transactions').select('*').eq('id', id).maybeSingle()
+        t = data
+      }
+      if (cancelled) return
+      if (t) editTransaction(t)
+      else setErr("That entry couldn't be found — it may have been deleted.")
+      navigate('/transactions', { replace: true })
+    })()
+    return () => { cancelled = true }
+  }, [location.search, household])
 
   useEffect(() => {
     if (!household) return
@@ -47,7 +59,7 @@ export default function Transactions() {
     // transactions has two FKs to accounts (account_id, to_account_id), so the
     // accounts embed must name the one we want or PostgREST rejects the request.
     const [txnRes, accRes, catRes] = await Promise.all([
-      supabase.from('transactions').select('*, budget_item:budget_items(name,category:budget_categories(name)), account:accounts!account_id(name)').eq('household_id', household.id).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(60),
+      supabase.from('transactions').select('*, budget_item:budget_items(name,category:budget_categories(name)), account:accounts!account_id(name)').eq('household_id', household.id).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(200),
       supabase.from('accounts').select('*').eq('household_id', household.id).eq('is_active', true).order('sort_order'),
       supabase.from('budget_categories').select('*, items:budget_items(id,name)').eq('household_id', household.id).order('sort_order'),
     ])
