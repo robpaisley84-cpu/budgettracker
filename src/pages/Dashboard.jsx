@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [moveTo, setMoveTo]           = useState('')
   const [moveAmt, setMoveAmt]         = useState('')
   const [moveNote, setMoveNote]       = useState('')
+  const [addAmt, setAddAmt]           = useState('')   // top up this fund from unassigned
   const [viewMonth, setViewMonth]     = useState(new Date())
   const month = format(viewMonth, 'yyyy-MM')
   const isCurrentMonth = month === format(new Date(), 'yyyy-MM')
@@ -357,7 +358,34 @@ export default function Dashboard() {
     setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
     // A line that is its own account has no envelope to true up — its balance
     // is set on the Accounts page — so open straight onto Move money.
-    setMoveMode(!!f.soleOwn); setMoveTo(''); setMoveAmt(''); setMoveNote('')
+    setMoveMode(!!f.soleOwn); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setAddAmt('')
+  }
+
+  // The mirror of "Back to unassigned": pull dollars that no fund has claimed
+  // into this one. A single positive allocation - a move, not a correction, so
+  // the line's history stays intact and it shows in Activity. A savings-backed
+  // fund also gets the real checking -> account transfer.
+  async function addFromPot() {
+    if (!trueUp || !(+addAmt > 0)) return
+    setTrueUpSaving(true)
+    const amt   = Math.round(Math.abs(+addAmt) * 100) / 100
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const { error } = await supabase.from('paycheck_allocations').insert({
+      household_id: household.id, budget_item_id: trueUp.id, amount: amt,
+      date: today, budget_month: today.slice(0, 7), note: 'Added from unassigned',
+    })
+    if (error) { setTrueUpSaving(false); setRecentErr(`Couldn't add to ${trueUp.name}: ${error.message}`); return }
+    const checkingId = accounts.find(a => a.type === 'checking')?.id || null
+    if (trueUp.backingAccountId && checkingId && trueUp.backingAccountId !== checkingId) {
+      const { error: tErr } = await supabase.from('transactions').insert({
+        household_id: household.id, account_id: checkingId, to_account_id: trueUp.backingAccountId,
+        type: 'transfer', amount: amt, description: `Added to ${trueUp.name} from checking`,
+        date: today, budget_month: today.slice(0, 7),
+      })
+      if (tErr) { setTrueUpSaving(false); setRecentErr(`Envelope topped up, but the account transfer didn't save: ${tErr.message}`); return }
+    }
+    setTrueUpSaving(false); setTrueUp(null); setAddAmt('')
+    load()
   }
 
   // Records what a fund really holds today and anchors future accrual to it.
@@ -932,6 +960,27 @@ export default function Dashboard() {
             )}
             </>
             )}
+
+            {/* Top up from the pot - available whichever mode is showing */}
+            <div style={{ marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid var(--hairline)' }}>
+              <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Add from unassigned</label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '8px', padding: '0 0.75rem' }}>
+                  <span style={{ color: 'var(--muted)', fontSize: '1rem', marginRight: '0.3rem' }}>$</span>
+                  <input type="number" step="0.01" value={addAmt} onChange={e => setAddAmt(e.target.value)} placeholder="0.00"
+                    onKeyDown={e => { if (e.key === 'Enter') addFromPot() }}
+                    style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '1.05rem', fontFamily: 'var(--font-mono)', padding: '0.5rem 0' }} />
+                </div>
+                <button onClick={addFromPot} disabled={trueUpSaving || !(+addAmt > 0)}
+                  style={{ background: +addAmt > 0 ? 'var(--green)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0 1rem', color: +addAmt > 0 ? 'var(--onAccent)' : 'var(--muted)', fontWeight: 700, fontSize: '0.85rem' }}>
+                  Add
+                </button>
+              </div>
+              <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginTop: '0.35rem', lineHeight: 1.45 }}>
+                Pulls from money in checking that no fund has claimed. A move, not a correction — the plan and the line's history are untouched.
+                {trueUp.ownAccount && ' This fund lives in its own account, so the money really moves there.'}
+              </div>
+            </div>
           </div>
         </div>
       )}
