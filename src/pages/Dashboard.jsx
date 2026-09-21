@@ -518,25 +518,29 @@ export default function Dashboard() {
 
             {/* Headline: what's spendable across every fund, and when the next check lands */}
             <div style={{ background: 'var(--card)', border: '1px solid var(--accent)', borderRadius: 'var(--radius) var(--radius) 0 0', padding: '0.85rem 0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem' }}>
+              {/* Headline = what's in checking that isn't reserved for a bill: allowance
+                  envelopes (net of overspend) plus unassigned. Moving money between the
+                  pot and an envelope leaves it alone - nothing left checking. Scheduling a
+                  bill or overspending brings it down. */}
+              {(() => { const uncommitted = spendNet + (unassigned || 0); return (
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: spendNet < 0 ? 'var(--red)' : 'var(--accentL)', lineHeight: 1 }}>
-                  {spendNet < 0 ? '-' : ''}{fmt(spendNet)}
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: uncommitted < 0 ? 'var(--red)' : 'var(--accentL)', lineHeight: 1 }}>
+                  {uncommitted < 0 ? '-' : ''}{fmt(uncommitted)}
                 </div>
                 <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginTop: '0.25rem', lineHeight: 1.5 }}>
-                  to spend from checking
-                  {overspent < 0 && <> · <span style={{ color: 'var(--green)' }}>{fmt(spendPos)}</span> in envelopes <span style={{ color: 'var(--red)' }}>−{fmt(overspent)}</span> overspent</>}
+                  uncommitted in checking · <span style={{ color: spendNet < 0 ? 'var(--red)' : 'var(--green)' }}>{spendNet < 0 ? '-' : ''}{fmt(spendNet)}</span> in envelopes
+                  {unassigned != null && Math.abs(unassigned) >= 1 && <> · <Link to="/accounts" style={{ color: 'var(--amber)', textDecoration: 'none' }}>{fmt(unassigned)} unassigned →</Link></>}
                 </div>
-                {unassigned != null && Math.abs(unassigned) >= 1 && (
-                  <div style={{ fontSize: '0.62rem', marginTop: '0.15rem' }}>
-                    <Link to="/accounts" style={{ color: 'var(--amber)', textDecoration: 'none' }}>
-                      {unassigned > 0 ? '+' : ''}{fmt(unassigned)} unassigned in checking — assign it →
-                    </Link>
+                {overspent < 0 && (
+                  <div style={{ fontSize: '0.58rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+                    envelopes: <span style={{ color: 'var(--green)' }}>{fmt(spendPos)}</span> showing green, <span style={{ color: 'var(--red)' }}>−{fmt(overspent)}</span> overspent already taken out
                   </div>
                 )}
                 {inSavings > 0 && (
                   <div style={{ fontSize: '0.58rem', color: 'var(--muted)', marginTop: '0.15rem' }}>{fmt(inSavings)} in savings accounts, not counted</div>
                 )}
               </div>
+              ) })()}
               {nextPay && (
                 <div style={{ textAlign: 'right', fontSize: '0.66rem', color: 'var(--muted)', lineHeight: 1.45 }}>
                   next check {format(nextPay, 'EEE MMM d')}<br />
