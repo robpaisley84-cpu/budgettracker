@@ -99,51 +99,88 @@ export function shareFor(line, { payday, held = 0, household }) {
 }
 
 /**
- * How far BEHIND PACE a scheduled line is - not how far from full.
- *
- * An annual bill is meant to fill over its whole cycle, so "bill minus held"
- * is the wrong question for eleven months of the year. The right one: if the
- * remaining checks each put in the even share for this cycle, would it be full
- * on the due date? The shortfall is what you'd have to add today to make that
- * true. On pace or ahead → 0. A monthly bill kept one payment ahead comes out
- * the same as before (it should already be nearly full).
+ * A bill is TIGHT when the last paycheck before its due date lands within this
+ * many days of it - or when no paycheck lands before it at all. A tight bill is
+ * held in full: a deposit that clears the same morning an autopay pulls is not
+ * something to plan around. Everything else is funded lean, to its due date.
  */
-export function shortfall(line, { held = 0, today = new Date(), household }) {
-  if (isFlexible(line) || !(billAmount(line) > 0)) return 0
+export const TIGHT_DAYS = 3
+
+/**
+ * The one pace calculation behind reserved(), safeToSpend() and shortfall(),
+ * so the three can never disagree.
+ *
+ * Pace runs from where saving for THIS cycle actually started. If the line's
+ * anchor (the fiscal-year reset, or a true-up) falls inside the cycle, that is
+ * the starting line and what "should" have been saved before it is water under
+ * the bridge. Otherwise the cycle start. Even share = what's left to save from
+ * that start, spread over the paydays from there to the due date.
+ *
+ * Returns null for anything that isn't a bill with an amount and a date.
+ */
+export function pace(line, { held = 0, today = new Date(), household }) {
+  if (isFlexible(line) || !(billAmount(line) > 0)) return null
   const due = nextDue(line, today)
-  if (!due) return 0
-  const from = startOfDay(today)
-  const bill = billAmount(line)
-  const need = bill - (+held || 0)
-  if (need <= 0) return 0
+  if (!due) return null
+  const from    = startOfDay(today)
+  const bill    = billAmount(line)
+  const paydays = household ? paydaysBetween(household, from, due) : []
+  const n       = paydays.length
+  const last    = paydays[n - 1]
+  const tight   = !last || differenceInCalendarDays(due, last.date) <= TIGHT_DAYS
 
-  // No payday before it's due: nothing is coming to help, so whatever is still
-  // needed has to be found now. (Thousand Trails due the 1st, check on the 2nd.)
-  const n = household ? paydaysBetween(household, from, due).length : 1
-  if (n === 0) return round2(need)
-
-  // Pace runs from where saving for THIS cycle actually started. If the line's
-  // anchor (the fiscal-year reset, or a true-up) falls inside the cycle, that
-  // is the starting line and what "should" have been saved before it is water
-  // under the bridge. Otherwise the cycle start. Even share = what's left to
-  // save from that start, spread over the paydays from there to the due date.
   const interval   = Math.max(1, +line.interval_months || 1)
   const cycleStart = addMonths(due, -interval)
   const anchor     = line.saved_as_of ? startOfDay(parseISO(line.saved_as_of)) : null
   const inCycle    = !!anchor && isAfter(anchor, cycleStart)
   const start      = inCycle ? anchor : cycleStart
   const base       = inCycle ? (+line.saved_so_far || 0) : 0
-  const total      = household ? paydaysBetween(household, addDays(start, 1), due).length : n
-  const steady     = total > 0 ? (bill - base) / total : need
-  return round2(Math.max(0, need - steady * n))
+  const total      = household ? paydaysBetween(household, addDays(start, 1), due).length : Math.max(1, n)
+  // A tight bill can't count on its LAST check - that's the one landing the
+  // same morning - so it has to be met by the check before. The cycle is
+  // therefore funded over one fewer check: a slightly steeper pace all the way
+  // along, not a full share demanded up front. For a monthly bill due on payday
+  // that means holding it all now; for an annual bill whose due date happens
+  // to fall on a payday eleven months out, it means each check saves ~4% more.
+  const usable     = tight ? Math.max(0, total - 1) : total
+  const steady     = usable > 0 ? (bill - base) / usable : bill
+  const fromChecks = steady * (tight ? Math.max(0, n - 1) : n)   // what future checks supply in time
+
+  // requiredNow: what has to be in the envelope today for the bill to be met.
+  return { due, bill, held: +held || 0, n, tight, steady, requiredNow: round2(Math.max(0, bill - fromChecks)) }
 }
 
-/** Hayley's number: what can actually be spent from this line right now. */
-export function safeToSpend(line, balance) {
+/** How much of a bill's balance is spoken for right now. 0 for an allowance. */
+export function reserved(line, ctx) {
+  const p = pace(line, ctx)
+  if (!p) return 0
+  return round2(Math.min(p.requiredNow, Math.max(0, p.held)))
+}
+
+/**
+ * How far BEHIND PACE a scheduled line is - not how far from full. What you'd
+ * have to add today so the bill is met on its due date given what future
+ * checks will contribute. A tight bill must be met in full now.
+ */
+export function shortfall(line, ctx) {
+  const p = pace(line, ctx)
+  if (!p) return 0
+  return round2(Math.max(0, p.requiredNow - p.held))
+}
+
+/**
+ * Hayley's number: what can actually be spent from this line right now.
+ * Allowance → its balance (negative = overspent). Bill → whatever it holds
+ * beyond what's reserved. Without a pace context (no household), a bill is
+ * treated as fully reserved - the conservative fallback.
+ */
+export function safeToSpend(line, balance, ctx) {
+  const bal = round2(+balance || 0)
   // No bill amount means nothing is reserved - show the balance (an overspend
   // must stay visible, not hide behind "reserved $0").
-  if (isFlexible(line) || !(billAmount(line) > 0)) return round2(+balance || 0)
-  return round2(Math.max(0, (+balance || 0) - billAmount(line)))
+  if (isFlexible(line) || !(billAmount(line) > 0)) return bal
+  if (!ctx?.household) return round2(Math.max(0, bal - billAmount(line)))
+  return round2(Math.max(0, bal - reserved(line, { ...ctx, held: bal })))
 }
 
 /** One line of plain English explaining a share, for the paycheck sheet. */

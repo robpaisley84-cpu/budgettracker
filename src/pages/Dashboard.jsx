@@ -9,7 +9,7 @@ import { CHECKS_PER_YEAR, paydaysBetween } from '../lib/projection'
 // safeToSpend is aliased: this component already has a local `safeToSpend`
 // (the monthly figure below), and the import was silently shadowed by it -
 // the load then called a number, and production showed "A is not a function".
-import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount, shortfall } from '../lib/funding'
+import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount, shortfall, reserved as reservedFor } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -208,11 +208,15 @@ export default function Dashboard() {
         id: item.id,
         name: item.name,
         scheduled,
-        safe: safeToSpendFor(item, balance),
+        // Lean where the timing allows, full where the check and the bill are
+        // close (TIGHT_DAYS): a bill's spare is what it holds beyond what's
+        // reserved for it, and that spare IS spendable.
+        safe: safeToSpendFor(item, balance, { household }),
+        reserved: scheduled ? reservedFor(item, { held: balance, household }) : 0,
         tier: item.tier || 'essential',
         // The number the row displays - a bill shows what it holds, an allowance
         // what's spendable - so the list can sort by what the eye sees.
-        shown: (scheduled && billAmount(item) > 0) ? balance : safeToSpendFor(item, balance),
+        shown: (scheduled && billAmount(item) > 0) ? balance : safeToSpendFor(item, balance, { household }),
         bill: scheduled ? billAmount(item) : null,
         // Behind an even funding pace, not merely below full - an annual bill
         // three checks into its year is meant to be mostly empty.
@@ -583,8 +587,9 @@ export default function Dashboard() {
         // the greens overstates it; and savings-account funds aren't checking at
         // all. A scheduled line with no amount is a plain overspend, not a bill.
         const flex   = funds.filter(f => inChk(f) && !isBill(f))
-        const spendNet   = flex.reduce((s, f) => s + f.safe, 0)
-        const spendPos   = flex.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
+        const billSpare  = funds.filter(f => inChk(f) && isBill(f)).reduce((s, f) => s + f.safe, 0)   // held beyond reserved
+        const spendNet   = flex.reduce((s, f) => s + f.safe, 0) + billSpare
+        const spendPos   = flex.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0) + billSpare
         const overspent  = flex.reduce((s, f) => s + (f.safe < 0 ? f.safe : 0), 0)
         const inSavings  = funds.filter(f => !inChk(f) && !isBill(f)).reduce((s, f) => s + Math.max(0, f.safe), 0)
         const shortBills = funds.filter(f => inChk(f) && isBill(f) && f.short > 0.5).length
@@ -646,9 +651,9 @@ export default function Dashboard() {
               {fundGroups.map(g => {
                 const meta     = TIER_META[g.key]
                 const isOpen   = !collapsed[g.key]
-                // Same rule as the headline: a scheduled line with no amount counts as an overspend
-                const spend    = g.items.reduce((s, f) => s + (!isBill(f) && f.safe > 0 ? f.safe : 0), 0)
-                const held     = g.items.reduce((s, f) => s + (isBill(f) ? Math.max(0, f.fundBalance) : 0), 0)
+                // Same rule as the headline: a bill's spare counts as spendable, only its reserved part as held
+                const spend    = g.items.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
+                const held     = g.items.reduce((s, f) => s + (isBill(f) ? f.reserved : 0), 0)
                 const over     = g.items.reduce((s, f) => s + (!isBill(f) && f.safe < 0 ? f.safe : 0), 0)
                 return (
                   <Fragment key={g.key}>
@@ -704,8 +709,10 @@ export default function Dashboard() {
                               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: behind ? 'var(--amber)' : 'var(--muted)' }}>
                                 {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
                               </div>
-                              <div style={{ fontSize: '0.52rem', color: behind ? 'var(--amber)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-                                {behind ? `behind ${fmt(f.short)}` : f.safe >= 1 ? `reserved · ${fmt(f.safe)} spare` : f.fundBalance < f.bill - 0.5 ? 'on pace' : 'reserved'}
+                              <div style={{ fontSize: '0.52rem', color: behind ? 'var(--amber)' : f.safe >= 1 ? 'var(--green)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+                                {behind ? `behind ${fmt(f.short)}`
+                                  : f.safe >= 1 ? `${fmt(f.reserved)} reserved · ${fmt(f.safe)} spare`
+                                  : f.fundBalance < f.bill - 0.5 ? 'on pace' : 'reserved'}
                               </div>
                             </>
                           )
