@@ -1,6 +1,7 @@
 // Sanity checks for src/lib/funding.js - not part of the app.
 // Run:  node funding-check.mjs      (same pattern as test-accrual.mjs)
 import { nextDue, shareFor, safeToSpend, shareReason, planForCheck, monthlyToPerCheck, shortfall } from './src/lib/funding.js'
+import { paydaysBetween } from './src/lib/projection.js'
 import { format } from 'date-fns'
 
 const hh = { paycheck_amount: 3801.71, pay_frequency: 'biweekly', pay_anchor_date: '2026-09-04' }
@@ -46,16 +47,29 @@ const regShare = shareFor(reg, { payday: d('2026-09-18'), held: 0, household: hh
 console.log('  annual share from Sept 18 across 12 checks:', regShare, '(want 20)')
 check('annual share', regShare, 240 / 12)
 
-// --- Behind pace, not "below full" ----------------------------------------
-// RV Insurance: $1081 due Aug 6 2027, cycle 12 months = 26 checks, even share 41.58.
-// From Sept 21 2026 there are 23 paydays left -> on pace means holding 1081 - 41.58*23 = 124.7.
-const rv = { funding_mode: 'scheduled', interval_months: 12, next_due_date: '2027-08-06', bill_amount: 1081 }
-check('annual bill on pace shows 0 behind',   shortfall(rv, { held: 125, today: d('2026-09-21'), household: hh }), 0)
-check('annual bill 35 behind pace',           shortfall(rv, { held: 90.08, today: d('2026-09-21'), household: hh }), 990.92 - (1081 * 12 / (26 * 12)) * 23)
-check('annual bill ahead of pace shows 0',    shortfall(rv, { held: 400, today: d('2026-09-21'), household: hh }), 0)
-check('monthly bill full is not behind',      shortfall(wheel, { held: 836.23, today: d('2026-09-21'), household: hh }), 0)
-check('monthly bill empty, one check left → behind by bill minus one even share',
-  shortfall(truck, { held: 0, today: d('2026-09-21'), household: hh }), 677 - 677 * 12 / 26)
+// --- Behind pace, from the fiscal-year anchor -----------------------------
+// RV Insurance: $1081 due Aug 6 2027, anchored 0 on 31 Aug 2026 (inside the cycle).
+// Paydays from 1 Sept 2026 to 6 Aug 2027 = 25, so the even share is 1081/25 = 43.24.
+// From 21 Sept there are 23 left: on pace = holding 1081 - 43.24*23 = 86.48.
+const rv = { funding_mode: 'scheduled', interval_months: 12, next_due_date: '2027-08-06', bill_amount: 1081, saved_so_far: 0, saved_as_of: '2026-08-31' }
+check('annual bill on pace (2 checks in) shows 0', shortfall(rv, { held: 90.08, today: d('2026-09-21'), household: hh }), 0)
+check('annual bill behind pace',                    shortfall(rv, { held: 40, today: d('2026-09-21'), household: hh }), 1041 - (1081 / 25) * 23)
+check('annual bill ahead of pace shows 0',          shortfall(rv, { held: 400, today: d('2026-09-21'), household: hh }), 0)
+// Anchor OUTSIDE the cycle falls back to the cycle start. Count the cycle's paydays
+// rather than assume 26 - a year of fortnightly pay can hold 27.
+const rvOld = { ...rv, saved_as_of: '2025-01-01', saved_so_far: 0 }
+// Midnight, not noon: the Aug 7 payday IS in the window, and d() builds noon dates
+const cyclePaydays = paydaysBetween(hh, new Date(2026, 7, 7), d('2027-08-06')).length
+check('anchor before the cycle → even share over the whole cycle',
+  shortfall(rvOld, { held: 90.08, today: d('2026-09-21'), household: hh }), 990.92 - (1081 / cyclePaydays) * 23)
+check('monthly bill full is not behind',            shortfall(wheel, { held: 836.23, today: d('2026-09-21'), household: hh }), 0)
+// Truck Loan due Oct 2: cycle from Sept 2 has 3 paydays (Sept 4, 18, Oct 2) → even share 225.67; 1 left
+check('monthly bill empty, one check left → behind by bill minus one cycle share',
+  shortfall(truck, { held: 0, today: d('2026-09-21'), household: hh }), 677 - 677 / 3)
+// Due Oct 1, next check Oct 2: nothing lands in time, so behind = everything still needed
+const tt = { funding_mode: 'scheduled', interval_months: 1, due_day: 1, bill_amount: 313 }
+check('bill due before any payday → behind by the full remainder',
+  shortfall(tt, { held: 3.12, today: d('2026-09-21'), household: hh }), 309.88)
 
 // --- Safe to spend -------------------------------------------------------
 check('flexible safe = balance', safeToSpend({ funding_mode: 'flexible' }, 284.65), 284.65)

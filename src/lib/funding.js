@@ -16,7 +16,7 @@
 // The month never appears in here. Paydays come from the household's real
 // schedule (paydaysBetween), so a three-check month is just three periods.
 
-import { addMonths, parseISO, startOfDay, startOfMonth, setDate, getDaysInMonth, isBefore, isAfter, format, differenceInCalendarDays } from 'date-fns'
+import { addMonths, addDays, parseISO, startOfDay, startOfMonth, setDate, getDaysInMonth, isBefore, isAfter, format, differenceInCalendarDays } from 'date-fns'
 // Explicit extension so plain `node` can run the check scripts against these
 // files directly (Vite resolves either form).
 import { paydaysBetween, CHECKS_PER_YEAR } from './projection.js'
@@ -112,12 +112,29 @@ export function shortfall(line, { held = 0, today = new Date(), household }) {
   if (isFlexible(line) || !(billAmount(line) > 0)) return 0
   const due = nextDue(line, today)
   if (!due) return 0
-  const from     = startOfDay(today)
-  const n        = Math.max(1, household ? paydaysBetween(household, from, due).length : 1)
-  const interval = Math.max(1, +line.interval_months || 1)
-  const perYear  = CHECKS_PER_YEAR[household?.pay_frequency] || 26
-  const steady   = (billAmount(line) * 12) / (perYear * interval)   // even share per check over the cycle
-  const need     = billAmount(line) - (+held || 0)
+  const from = startOfDay(today)
+  const bill = billAmount(line)
+  const need = bill - (+held || 0)
+  if (need <= 0) return 0
+
+  // No payday before it's due: nothing is coming to help, so whatever is still
+  // needed has to be found now. (Thousand Trails due the 1st, check on the 2nd.)
+  const n = household ? paydaysBetween(household, from, due).length : 1
+  if (n === 0) return round2(need)
+
+  // Pace runs from where saving for THIS cycle actually started. If the line's
+  // anchor (the fiscal-year reset, or a true-up) falls inside the cycle, that
+  // is the starting line and what "should" have been saved before it is water
+  // under the bridge. Otherwise the cycle start. Even share = what's left to
+  // save from that start, spread over the paydays from there to the due date.
+  const interval   = Math.max(1, +line.interval_months || 1)
+  const cycleStart = addMonths(due, -interval)
+  const anchor     = line.saved_as_of ? startOfDay(parseISO(line.saved_as_of)) : null
+  const inCycle    = !!anchor && isAfter(anchor, cycleStart)
+  const start      = inCycle ? anchor : cycleStart
+  const base       = inCycle ? (+line.saved_so_far || 0) : 0
+  const total      = household ? paydaysBetween(household, addDays(start, 1), due).length : n
+  const steady     = total > 0 ? (bill - base) / total : need
   return round2(Math.max(0, need - steady * n))
 }
 
