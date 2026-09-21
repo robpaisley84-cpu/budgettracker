@@ -6,7 +6,10 @@ import { format, addMonths, subMonths, getDaysInMonth, getDate, startOfMonth, en
 import { computeAccrual } from '../lib/accrual'
 import { linesPerAccount, isSoleOccupant, anchorsFor, spendSinceAnchor, allocatedSinceAnchor, fundBalance } from '../lib/funds'
 import { CHECKS_PER_YEAR, paydaysBetween } from '../lib/projection'
-import { isScheduled, safeToSpend, nextDue, billAmount } from '../lib/funding'
+// safeToSpend is aliased: this component already has a local `safeToSpend`
+// (the monthly figure below), and the import was silently shadowed by it -
+// the load then called a number, and production showed "A is not a function".
+import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -202,7 +205,7 @@ export default function Dashboard() {
         id: item.id,
         name: item.name,
         scheduled,
-        safe: safeToSpend(item, balance),
+        safe: safeToSpendFor(item, balance),
         bill: scheduled ? billAmount(item) : null,
         dueNext: due,
         perCheck: +item.per_check_amount || 0,
