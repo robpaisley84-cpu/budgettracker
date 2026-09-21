@@ -458,8 +458,19 @@ export default function Dashboard() {
       {/* Safe to spend — the front page is the envelopes, not the month (015).
           One number per fund, right now. Scheduled bills show as reserved. */}
       {(() => {
-        const totalSafe   = funds.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
-        const overspent   = funds.filter(f => !f.scheduled && f.safe < 0).reduce((s, f) => s + f.safe, 0)
+        // The headline is CHECKING's spendable money, net. Overspent envelopes have
+        // already consumed cash out from under the positive ones, so adding up only
+        // the greens overstates it; and savings-account funds aren't checking at
+        // all. A scheduled line with no amount is a plain overspend, not a bill.
+        const checkingAcc = accounts.find(a => a.type === 'checking')
+        const inChk  = (f) => f.backingAccountId === checkingAcc?.id
+        const isBill = (f) => f.scheduled && f.bill > 0
+        const flex   = funds.filter(f => inChk(f) && !isBill(f))
+        const spendNet   = flex.reduce((s, f) => s + f.safe, 0)
+        const spendPos   = flex.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
+        const overspent  = flex.reduce((s, f) => s + (f.safe < 0 ? f.safe : 0), 0)
+        const inSavings  = funds.filter(f => !inChk(f) && !isBill(f)).reduce((s, f) => s + Math.max(0, f.safe), 0)
+        const unassigned = checkingAcc ? +checkingAcc.balance - funds.filter(inChk).reduce((s, f) => s + f.fundBalance, 0) : null
         const nextPay     = paydaysBetween(household, new Date(), addDays(new Date(), 45))[0]?.date
         const daysToPay   = nextPay ? differenceInCalendarDays(nextPay, new Date()) : null
         return (
@@ -471,11 +482,24 @@ export default function Dashboard() {
 
             {/* Headline: what's spendable across every fund, and when the next check lands */}
             <div style={{ background: 'var(--card)', border: '1px solid var(--accent)', borderRadius: 'var(--radius) var(--radius) 0 0', padding: '0.85rem 0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.6rem' }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--accentL)', lineHeight: 1 }}>{fmt(totalSafe)}</div>
-                <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
-                  across all funds{overspent < 0 && <> · <span style={{ color: 'var(--red)' }}>{fmt(overspent)} overspent</span></>}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: spendNet < 0 ? 'var(--red)' : 'var(--accentL)', lineHeight: 1 }}>
+                  {spendNet < 0 ? '-' : ''}{fmt(spendNet)}
                 </div>
+                <div style={{ fontSize: '0.62rem', color: 'var(--muted)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                  to spend from checking
+                  {overspent < 0 && <> · <span style={{ color: 'var(--green)' }}>{fmt(spendPos)}</span> in envelopes <span style={{ color: 'var(--red)' }}>−{fmt(overspent)}</span> overspent</>}
+                </div>
+                {unassigned != null && Math.abs(unassigned) >= 1 && (
+                  <div style={{ fontSize: '0.62rem', marginTop: '0.15rem' }}>
+                    <Link to="/accounts" style={{ color: 'var(--amber)', textDecoration: 'none' }}>
+                      {unassigned > 0 ? '+' : ''}{fmt(unassigned)} unassigned in checking — assign it →
+                    </Link>
+                  </div>
+                )}
+                {inSavings > 0 && (
+                  <div style={{ fontSize: '0.58rem', color: 'var(--muted)', marginTop: '0.15rem' }}>{fmt(inSavings)} in savings accounts, not counted</div>
+                )}
               </div>
               {nextPay && (
                 <div style={{ textAlign: 'right', fontSize: '0.66rem', color: 'var(--muted)', lineHeight: 1.45 }}>
@@ -494,9 +518,10 @@ export default function Dashboard() {
               {fundGroups.map(g => {
                 const meta     = TIER_META[g.key]
                 const isOpen   = !collapsed[g.key]
-                const spend    = g.items.reduce((s, f) => s + (!f.scheduled && f.safe > 0 ? f.safe : 0), 0)
-                const held     = g.items.reduce((s, f) => s + (f.scheduled && f.bill > 0 ? Math.max(0, f.fundBalance) : 0), 0)
-                const over     = g.items.reduce((s, f) => s + (!f.scheduled && f.safe < 0 ? f.safe : 0), 0)
+                // Same rule as the headline: a scheduled line with no amount counts as an overspend
+                const spend    = g.items.reduce((s, f) => s + (!isBill(f) && f.safe > 0 ? f.safe : 0), 0)
+                const held     = g.items.reduce((s, f) => s + (isBill(f) ? Math.max(0, f.fundBalance) : 0), 0)
+                const over     = g.items.reduce((s, f) => s + (!isBill(f) && f.safe < 0 ? f.safe : 0), 0)
                 return (
                   <Fragment key={g.key}>
                     {/* Tier header - tap to fold the group. Shows what the tier has to
