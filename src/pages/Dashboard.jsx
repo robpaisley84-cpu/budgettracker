@@ -9,7 +9,7 @@ import { CHECKS_PER_YEAR, paydaysBetween } from '../lib/projection'
 // safeToSpend is aliased: this component already has a local `safeToSpend`
 // (the monthly figure below), and the import was silently shadowed by it -
 // the load then called a number, and production showed "A is not a function".
-import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount } from '../lib/funding'
+import { isScheduled, safeToSpend as safeToSpendFor, nextDue, billAmount, shortfall } from '../lib/funding'
 
 const fmt = (n) => '$' + Math.abs(Math.round(n)).toLocaleString()
 
@@ -211,6 +211,9 @@ export default function Dashboard() {
         // what's spendable - so the list can sort by what the eye sees.
         shown: (scheduled && billAmount(item) > 0) ? balance : safeToSpendFor(item, balance),
         bill: scheduled ? billAmount(item) : null,
+        // Behind an even funding pace, not merely below full - an annual bill
+        // three checks into its year is meant to be mostly empty.
+        short: scheduled ? shortfall(item, { held: balance, household }) : 0,
         dueNext: due,
         perCheck: +item.per_check_amount || 0,
         monthlyBudget,
@@ -371,8 +374,8 @@ export default function Dashboard() {
   function openBalance() {
     const rows = funds.filter(inChk).flatMap(f => {
       if (isBill(f)) {
-        const short = f.bill - f.fundBalance
-        return short > 0.5 ? [{ id: f.id, name: f.name, kind: 'bill', deficit: short, amount: String(Math.round(short * 100) / 100), on: true }] : []
+        // Only bills that are BEHIND PACE - a half-filled annual bill on schedule isn't a problem
+        return f.short > 0.5 ? [{ id: f.id, name: f.name, kind: 'bill', deficit: f.short, amount: String(Math.round(f.short * 100) / 100), on: true }] : []
       }
       return f.safe < -0.5 ? [{ id: f.id, name: f.name, kind: 'over', deficit: -f.safe, amount: String(Math.round(-f.safe * 100) / 100), on: true }] : []
     }).sort((a, b) => b.deficit - a.deficit)
@@ -545,7 +548,7 @@ export default function Dashboard() {
         const spendPos   = flex.reduce((s, f) => s + (f.safe > 0 ? f.safe : 0), 0)
         const overspent  = flex.reduce((s, f) => s + (f.safe < 0 ? f.safe : 0), 0)
         const inSavings  = funds.filter(f => !inChk(f) && !isBill(f)).reduce((s, f) => s + Math.max(0, f.safe), 0)
-        const shortBills = funds.filter(f => inChk(f) && isBill(f) && f.bill - f.fundBalance > 0.5).length
+        const shortBills = funds.filter(f => inChk(f) && isBill(f) && f.short > 0.5).length
         const outOfBalance = overspent < -0.5 || shortBills > 0 || Math.abs(unassigned || 0) >= 1
         const nextPay     = paydaysBetween(household, new Date(), addDays(new Date(), 45))[0]?.date
         const daysToPay   = nextPay ? differenceInCalendarDays(nextPay, new Date()) : null
@@ -656,15 +659,14 @@ export default function Dashboard() {
                           loan never reads as "empty". Amber if it's behind. */}
                       <div style={{ textAlign: 'right' }}>
                         {f.scheduled && f.bill > 0 ? (() => {
-                          const short = f.bill - f.fundBalance
-                          const behind = short > 0.5
+                          const behind = f.short > 0.5
                           return (
                             <>
                               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.92rem', fontWeight: 600, color: behind ? 'var(--amber)' : 'var(--muted)' }}>
                                 {f.fundBalance < 0 ? '-' : ''}{fmt(f.fundBalance)}
                               </div>
                               <div style={{ fontSize: '0.52rem', color: behind ? 'var(--amber)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-                                {behind ? `short ${fmt(short)}` : f.safe >= 1 ? `reserved · ${fmt(f.safe)} spare` : 'reserved'}
+                                {behind ? `behind ${fmt(f.short)}` : f.safe >= 1 ? `reserved · ${fmt(f.safe)} spare` : f.fundBalance < f.bill - 0.5 ? 'on pace' : 'reserved'}
                               </div>
                             </>
                           )
@@ -954,7 +956,7 @@ export default function Dashboard() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
                       <div style={{ fontSize: '0.58rem', color: r.kind === 'bill' ? 'var(--amber)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
-                        {r.kind === 'bill' ? `bill short ${fmt(r.deficit)}` : `overspent ${fmt(r.deficit)}`}
+                        {r.kind === 'bill' ? `bill behind pace by ${fmt(r.deficit)}` : `overspent ${fmt(r.deficit)}`}
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '6px', padding: '0 0.4rem' }}>

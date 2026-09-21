@@ -98,6 +98,29 @@ export function shareFor(line, { payday, held = 0, household }) {
   return round2(need / n)
 }
 
+/**
+ * How far BEHIND PACE a scheduled line is - not how far from full.
+ *
+ * An annual bill is meant to fill over its whole cycle, so "bill minus held"
+ * is the wrong question for eleven months of the year. The right one: if the
+ * remaining checks each put in the even share for this cycle, would it be full
+ * on the due date? The shortfall is what you'd have to add today to make that
+ * true. On pace or ahead → 0. A monthly bill kept one payment ahead comes out
+ * the same as before (it should already be nearly full).
+ */
+export function shortfall(line, { held = 0, today = new Date(), household }) {
+  if (isFlexible(line) || !(billAmount(line) > 0)) return 0
+  const due = nextDue(line, today)
+  if (!due) return 0
+  const from     = startOfDay(today)
+  const n        = Math.max(1, household ? paydaysBetween(household, from, due).length : 1)
+  const interval = Math.max(1, +line.interval_months || 1)
+  const perYear  = CHECKS_PER_YEAR[household?.pay_frequency] || 26
+  const steady   = (billAmount(line) * 12) / (perYear * interval)   // even share per check over the cycle
+  const need     = billAmount(line) - (+held || 0)
+  return round2(Math.max(0, need - steady * n))
+}
+
 /** Hayley's number: what can actually be spent from this line right now. */
 export function safeToSpend(line, balance) {
   // No bill amount means nothing is reserved - show the balance (an overspend
