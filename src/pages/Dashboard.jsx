@@ -53,6 +53,9 @@ export default function Dashboard() {
   const [trueUpVal, setTrueUpVal]     = useState('')
   const [trueUpSaving, setTrueUpSaving] = useState(false)
   const [moveMode, setMoveMode]       = useState(false)
+  const [pullMode, setPullMode]       = useState(false)   // "Move from": bring money IN from another fund
+  const [pullFrom, setPullFrom]       = useState('')
+  const [pullAmt, setPullAmt]         = useState('')
   const [moveTo, setMoveTo]           = useState('')
   const [moveAmt, setMoveAmt]         = useState('')
   const [moveNote, setMoveNote]       = useState('')
@@ -403,7 +406,43 @@ export default function Dashboard() {
     setTrueUpVal(f.fundBalance != null ? String(Math.round(f.fundBalance * 100) / 100) : '')
     // A line that is its own account has no envelope to true up — its balance
     // is set on the Accounts page — so open straight onto Move money.
-    setMoveMode(!!f.soleOwn); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setAddAmt('')
+    setMoveMode(!!f.soleOwn); setPullMode(false); setPullFrom(''); setPullAmt(''); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setAddAmt('')
+  }
+
+  // Funds this one may draw from: anything with spendable money, except bills -
+  // a bill's envelope is reserved and is never a source (Rob's rule).
+  const pullSources = trueUp
+    ? funds.filter(f => f.id !== trueUp.id && !(f.scheduled && f.bill > 0) && f.safe > 0.005)
+           .sort((a, b) => b.safe - a.safe)
+    : []
+
+  // Move money INTO this fund from another. Same two-row record as moveMoney,
+  // reversed; the amount is capped at what the source actually has available.
+  async function pullMoney() {
+    const src = funds.find(f => f.id === pullFrom)
+    const amt = Math.round(Math.min(Math.abs(+pullAmt) || 0, src?.safe || 0) * 100) / 100
+    if (!trueUp || !src || !(amt > 0)) return
+    setTrueUpSaving(true)
+    const group = crypto.randomUUID()
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const base  = { household_id: household.id, transfer_group: group, date: today, budget_month: today.slice(0, 7) }
+    const { error } = await supabase.from('paycheck_allocations').insert([
+      { ...base, budget_item_id: src.id,    amount: -amt, note: moveNote || `Moved to ${trueUp.name}` },
+      { ...base, budget_item_id: trueUp.id, amount:  amt, note: moveNote || `Moved from ${src.name}` },
+    ])
+    if (error) { setTrueUpSaving(false); setRecentErr(`Couldn't move money: ${error.message}`); return }
+    // Different accounts → the money really moves; record the transfer so both balances follow
+    if (src.backingAccountId && trueUp.backingAccountId && src.backingAccountId !== trueUp.backingAccountId) {
+      const { error: tErr } = await supabase.from('transactions').insert({
+        household_id: household.id, account_id: src.backingAccountId, to_account_id: trueUp.backingAccountId,
+        type: 'transfer', amount: amt, description: moveNote || `Moved: ${src.name} → ${trueUp.name}`,
+        date: today, budget_month: today.slice(0, 7),
+      })
+      if (tErr) { setTrueUpSaving(false); setRecentErr(`Envelopes moved, but the account transfer didn't save: ${tErr.message}`); return }
+    }
+    setTrueUpSaving(false)
+    setTrueUp(null); setPullFrom(''); setPullAmt(''); setMoveNote(''); setPullMode(false)
+    load()
   }
 
   // The mirror of "Back to unassigned": pull dollars that no fund has claimed
@@ -503,7 +542,7 @@ export default function Dashboard() {
       if (tErr) { setTrueUpSaving(false); setRecentErr(`Envelopes moved, but the account transfer didn't save: ${tErr.message}`); return }
     }
     setTrueUpSaving(false)
-    setTrueUp(null); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setMoveMode(false)
+    setTrueUp(null); setMoveTo(''); setMoveAmt(''); setMoveNote(''); setMoveMode(false); setPullMode(false)
     load()
   }
 
@@ -988,7 +1027,7 @@ export default function Dashboard() {
         <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'flex-end', zIndex: 50 }}
           onClick={e => { if (e.target === e.currentTarget) setTrueUp(null) }}>
           <div style={{ background: 'var(--sheet)', borderTop: '2px solid var(--accent)', borderRadius: '16px 16px 0 0', padding: '1.25rem 1.25rem 2rem', width: '100%', maxWidth: '600px', margin: '0 auto' }}>
-            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>{moveMode ? 'Move money' : 'True up fund'}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>{pullMode ? 'Move money in' : moveMode ? 'Move money out' : 'True up fund'}</div>
             <div style={{ fontSize: '1rem', color: 'var(--text)', marginBottom: '0.5rem' }}>{trueUp.name}</div>
 
             <div style={{ fontSize: '0.72rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: '0.85rem' }}>
@@ -999,18 +1038,84 @@ export default function Dashboard() {
               {!trueUp.soleOwn && trueUp.fundBalance < 0 && ' This fund has lent out more than it holds.'}
             </div>
 
-            {/* Two actions on one sheet: state the real balance, or move dollars
-                out. A line that is the only one in its own account only gets the second. */}
+            {/* Three actions on one sheet: state the real balance, pull money in from
+                another fund, or push it out. A line that is the only one in its own
+                account has no envelope to true up, so it gets the two moves only. */}
             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem' }}>
-              {[{ k: false, l: 'Set balance' }, { k: true, l: 'Move money' }].filter(o => !(trueUp.soleOwn && o.k === false)).map(o => (
-                <button key={String(o.k)} onClick={() => setMoveMode(o.k)}
-                  style={{ flex: 1, background: moveMode === o.k ? 'var(--accent)' : 'transparent', border: `1px solid ${moveMode === o.k ? 'var(--accent)' : 'var(--border)'}`, color: moveMode === o.k ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '6px', padding: '0.4rem', fontSize: '0.75rem', fontWeight: moveMode === o.k ? 700 : 400 }}>
-                  {o.l}
-                </button>
-              ))}
+              {[
+                { k: 'set',  l: 'Set balance' },
+                { k: 'pull', l: 'Move from…' },
+                { k: 'move', l: 'Move to…' },
+              ].filter(o => !(trueUp.soleOwn && o.k === 'set')).map(o => {
+                const on = o.k === 'pull' ? pullMode : o.k === 'move' ? (moveMode && !pullMode) : (!moveMode && !pullMode)
+                return (
+                  <button key={o.k} onClick={() => { setPullMode(o.k === 'pull'); setMoveMode(o.k === 'move') }}
+                    style={{ flex: 1, background: on ? 'var(--accent)' : 'transparent', border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`, color: on ? 'var(--onAccent)' : 'var(--muted)', borderRadius: '6px', padding: '0.4rem', fontSize: '0.75rem', fontWeight: on ? 700 : 400 }}>
+                    {o.l}
+                  </button>
+                )
+              })}
             </div>
 
-            {moveMode ? (
+            {pullMode ? (
+              <>
+                <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Move from</label>
+                <select value={pullFrom} onChange={e => { setPullFrom(e.target.value); setPullAmt('') }}
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.35rem' }}>
+                  <option value="">Choose a fund…</option>
+                  {pullSources.map(f => (
+                    <option key={f.id} value={f.id}>{f.name} · {fmt(f.safe)} available{f.ownAccount ? ` · ${f.backedBy}` : ''}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: '0.6rem', color: 'var(--muted)', marginBottom: '0.85rem', lineHeight: 1.45 }}>
+                  {pullSources.length === 0 ? 'No fund has spendable money to lend right now.' : 'Only funds with money to spare are offered. Bills aren’t — their money is reserved until they’re paid.'}
+                </div>
+
+                {(() => {
+                  const src = funds.find(f => f.id === pullFrom)
+                  if (!src) return null
+                  const cap = Math.round(src.safe * 100) / 100
+                  const amt = Math.min(+pullAmt || 0, cap)
+                  return (
+                    <>
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Amount · up to {fmt(cap)}</label>
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: 'var(--bg)', border: `1px solid ${+pullAmt > cap ? 'var(--red)' : 'var(--accent)'}`, borderRadius: '8px', padding: '0 0.85rem' }}>
+                          <span style={{ color: 'var(--accentL)', fontSize: '1.1rem', marginRight: '0.3rem' }}>$</span>
+                          <input type="number" step="0.01" min="0" max={cap} value={pullAmt} autoFocus onChange={e => setPullAmt(e.target.value)} placeholder="0.00"
+                            onKeyDown={e => { if (e.key === 'Enter') pullMoney() }}
+                            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--accentL)', fontSize: '1.3rem', fontFamily: 'var(--font-mono)', padding: '0.55rem 0' }} />
+                        </div>
+                        <button onClick={() => setPullAmt(String(cap))} title={`Everything ${src.name} has available`}
+                          style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', padding: '0 0.8rem', color: 'var(--muted)', fontSize: '0.75rem' }}>all</button>
+                      </div>
+                      {+pullAmt > cap && <div style={{ fontSize: '0.66rem', color: 'var(--red)', marginBottom: '0.5rem' }}>Capped at {fmt(cap)} — that's all {src.name} has to spare.</div>}
+
+                      <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', margin: '0.5rem 0 0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Why (optional)</label>
+                      <input value={moveNote} onChange={e => setMoveNote(e.target.value)} placeholder="e.g. Thousand Trails due before payday"
+                        style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '7px', padding: '0.6rem 0.8rem', color: 'var(--text)', fontSize: '0.85rem', outline: 'none', marginBottom: '0.85rem' }} />
+
+                      {amt > 0 && (
+                        <div style={{ fontSize: '0.66rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginBottom: '0.85rem', lineHeight: 1.6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{src.name}</span><span>{fmt(src.safe)} → {fmt(src.safe - amt)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{trueUp.name}</span><span style={{ color: 'var(--green)' }}>{trueUp.fundBalance < 0 ? '-' : ''}{fmt(trueUp.fundBalance)} → {fmt(trueUp.fundBalance + amt)}</span>
+                          </div>
+                          {src.backingAccountId !== trueUp.backingAccountId && <div style={{ color: 'var(--amber)' }}>Different accounts — a real transfer is recorded too.</div>}
+                        </div>
+                      )}
+
+                      <button onClick={pullMoney} disabled={trueUpSaving || !(amt > 0)}
+                        style={{ width: '100%', background: amt > 0 ? 'var(--accent)' : 'var(--border)', border: 'none', borderRadius: '8px', padding: '0.8rem', color: amt > 0 ? 'var(--onAccent)' : 'var(--muted)', fontWeight: 700, fontSize: '0.9rem' }}>
+                        {trueUpSaving ? 'Moving…' : amt > 0 ? `Move ${fmt(amt)} from ${src.name}` : 'Move money in'}
+                      </button>
+                    </>
+                  )
+                })()}
+              </>
+            ) : moveMode ? (
               <>
                 <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Move to</label>
                 <select value={moveTo} onChange={e => setMoveTo(e.target.value)}
