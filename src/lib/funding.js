@@ -142,8 +142,13 @@ export function shareFor(line, { payday, held = 0, household, lastPaid = null })
  * many days of it - or when no paycheck lands before it at all. A tight bill is
  * held in full: a deposit that clears the same morning an autopay pulls is not
  * something to plan around. Everything else is funded lean, to its due date.
+ *
+ * Was 3; relaxed to 1 on 2026-10-16 at Rob's call. Payroll is a reliable
+ * Friday-morning ACH, so a bill due two or more days after the last payday can
+ * count on that check (the Nov 15 loan draft may lean on the Nov 13 check).
+ * Same-day and next-day autopays stay protected.
  */
-export const TIGHT_DAYS = 3
+export const TIGHT_DAYS = 1
 
 /**
  * The one pace calculation behind reserved(), safeToSpend() and shortfall(),
