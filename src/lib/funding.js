@@ -163,7 +163,14 @@ export function pace(line, { held = 0, today = new Date(), household, lastPaid =
   if (!due) return null
   const from    = startOfDay(today)
   const bill    = billAmount(line)
-  const paydays = household ? paydaysBetween(household, from, due) : []
+  // Future paydays are counted from TOMORROW: a payday that has already dawned
+  // is assumed to have delivered its check (its money is in `held`). Counting
+  // today's payday as still-to-come double-counted it all payday afternoon —
+  // a bill topped up by that morning's check showed the whole share as "safe
+  // to spend" (Sam's Club read "$250 safe" on 2026-10-16). The cost: on a
+  // payday morning, before Process Paycheck, bills briefly read behind/$0 —
+  // conservative, and it resolves the moment the check is processed.
+  const paydays = household ? paydaysBetween(household, addDays(from, 1), due) : []
   const n       = paydays.length
   const last    = paydays[n - 1]
   const tight   = !last || differenceInCalendarDays(due, last.date) <= TIGHT_DAYS
